@@ -1,0 +1,288 @@
+schema_version: 1
+
+families:
+  - id: addressing-traffic
+    title: 寻址与流量
+  - id: distributed-storage
+    title: 分布式存储
+  - id: feed-social-ranking
+    title: 信息流、社交与排序
+  - id: realtime-collaboration
+    title: 实时通信与协作
+  - id: search-crawl-geo
+    title: 搜索、抓取与地理服务
+  - id: media-delivery
+    title: 媒体处理与分发
+  - id: transactions-contention
+    title: 交易与争用
+  - id: streaming-analytics-observability
+    title: 流处理、分析与可观测性
+  - id: scheduling-control-plane
+    title: 调度与控制平面
+  - id: ai-vector
+    title: 人工智能与向量系统
+
+cases:
+  - id: url-shortener
+    title: 短链接服务
+    primary_family: addressing-traffic
+  - id: pastebin
+    title: 文本分享服务
+    primary_family: addressing-traffic
+  - id: distributed-id
+    title: 分布式 ID 生成器
+    primary_family: addressing-traffic
+  - id: dns-service-discovery
+    title: DNS 与服务发现
+    primary_family: addressing-traffic
+  - id: load-balancer-api-gateway
+    title: 负载均衡器与 API 网关
+    primary_family: addressing-traffic
+  - id: distributed-rate-limiter
+    title: 分布式限流器
+    primary_family: addressing-traffic
+  - id: consistent-hash-router
+    title: 一致性哈希路由器
+    primary_family: addressing-traffic
+
+  - id: key-value-store
+    title: 键值存储
+    primary_family: distributed-storage
+  - id: distributed-cache
+    title: 分布式缓存
+    primary_family: distributed-storage
+  - id: distributed-sql
+    title: 分布式 SQL 数据库
+    primary_family: distributed-storage
+  - id: wide-column-document-store
+    title: 宽列与文档存储
+    primary_family: distributed-storage
+  - id: object-storage
+    title: 对象存储
+    primary_family: distributed-storage
+  - id: cloud-file-sync
+    title: 云文件同步
+    primary_family: distributed-storage
+  - id: time-series-database
+    title: 时序数据库
+    primary_family: distributed-storage
+
+  - id: social-news-feed
+    title: 社交信息流
+    primary_family: feed-social-ranking
+  - id: photo-sharing
+    title: 图片分享
+    primary_family: feed-social-ranking
+  - id: qa-news-aggregation
+    title: 问答与新闻聚合
+    primary_family: feed-social-ranking
+  - id: top-k-heavy-hitters
+    title: Top-K 与高频项统计
+    primary_family: feed-social-ranking
+  - id: leaderboard
+    title: 排行榜
+    primary_family: feed-social-ranking
+  - id: comments-reactions
+    title: 评论与互动
+    primary_family: feed-social-ranking
+  - id: recommendation-system
+    title: 推荐系统
+    primary_family: feed-social-ranking
+  - id: ad-serving-ranking
+    title: 广告投放与排序
+    primary_family: feed-social-ranking
+
+  - id: chat-messenger
+    title: 聊天与即时通信
+    primary_family: realtime-collaboration
+  - id: notification-delivery
+    title: 通知投递
+    primary_family: realtime-collaboration
+  - id: distributed-email-service
+    title: 分布式邮件服务
+    primary_family: realtime-collaboration
+  - id: webhook-delivery
+    title: Webhook 投递
+    primary_family: realtime-collaboration
+  - id: presence-service
+    title: 在线状态服务
+    primary_family: realtime-collaboration
+  - id: collaborative-editor
+    title: 协同编辑器
+    primary_family: realtime-collaboration
+  - id: live-comments
+    title: 实时评论
+    primary_family: realtime-collaboration
+  - id: video-conferencing
+    title: 视频会议
+    primary_family: realtime-collaboration
+
+  - id: web-crawler
+    title: 网络爬虫
+    primary_family: search-crawl-geo
+  - id: autocomplete
+    title: 自动补全
+    primary_family: search-crawl-geo
+  - id: full-text-search
+    title: 全文搜索
+    primary_family: search-crawl-geo
+  - id: social-graph
+    title: 社交图谱
+    primary_family: search-crawl-geo
+  - id: nearby-places
+    title: 附近地点
+    primary_family: search-crawl-geo
+  - id: maps-navigation
+    title: 地图与导航
+    primary_family: search-crawl-geo
+  - id: ride-hailing-dispatch
+    title: 网约车调度
+    primary_family: search-crawl-geo
+  - id: food-delivery-dispatch
+    title: 外卖配送调度
+    primary_family: search-crawl-geo
+
+  - id: video-on-demand
+    title: 视频点播
+    primary_family: media-delivery
+  - id: live-streaming
+    title: 直播
+    primary_family: media-delivery
+  - id: image-service
+    title: 图片服务
+    primary_family: media-delivery
+  - id: cdn
+    title: 内容分发网络
+    primary_family: media-delivery
+  - id: large-file-transfer
+    title: 大文件传输
+    primary_family: media-delivery
+  - id: transcoding-pipeline
+    title: 转码流水线
+    primary_family: media-delivery
+  - id: music-podcast-streaming
+    title: 音乐与播客流媒体
+    primary_family: media-delivery
+
+  - id: ticketing
+    title: 票务系统
+    primary_family: transactions-contention
+  - id: appointment-booking
+    title: 预约系统
+    primary_family: transactions-contention
+  - id: online-auction
+    title: 在线拍卖
+    primary_family: transactions-contention
+  - id: payment-system
+    title: 支付系统
+    primary_family: transactions-contention
+  - id: double-entry-ledger-wallet
+    title: 复式记账账本与钱包
+    primary_family: transactions-contention
+  - id: trading-brokerage
+    title: 证券交易与经纪系统
+    primary_family: transactions-contention
+  - id: ecommerce-order-inventory
+    title: 电商订单与库存
+    primary_family: transactions-contention
+  - id: bank-transfer
+    title: 银行转账
+    primary_family: transactions-contention
+
+  - id: distributed-log-message-queue
+    title: 分布式日志与消息队列
+    primary_family: streaming-analytics-observability
+  - id: pubsub
+    title: 发布订阅系统
+    primary_family: streaming-analytics-observability
+  - id: ad-click-aggregation
+    title: 广告点击聚合
+    primary_family: streaming-analytics-observability
+  - id: metrics-monitoring-alerting
+    title: 指标、监控与告警
+    primary_family: streaming-analytics-observability
+  - id: centralized-logging
+    title: 集中式日志
+    primary_family: streaming-analytics-observability
+  - id: stream-processing
+    title: 流处理
+    primary_family: streaming-analytics-observability
+  - id: batch-data-pipeline
+    title: 批处理数据流水线
+    primary_family: streaming-analytics-observability
+
+  - id: job-scheduler
+    title: 作业调度器
+    primary_family: scheduling-control-plane
+  - id: dag-workflow
+    title: DAG 工作流
+    primary_family: scheduling-control-plane
+  - id: ci-runner
+    title: CI 运行器
+    primary_family: scheduling-control-plane
+  - id: deployment-system
+    title: 部署系统
+    primary_family: scheduling-control-plane
+  - id: container-orchestrator
+    title: 容器编排器
+    primary_family: scheduling-control-plane
+  - id: configuration-feature-flags
+    title: 配置与功能开关
+    primary_family: scheduling-control-plane
+  - id: multi-tenant-cloud-control-plane
+    title: 多租户云控制平面
+    primary_family: scheduling-control-plane
+  - id: identity-authorization-service
+    title: 身份与授权服务
+    primary_family: scheduling-control-plane
+
+  - id: llm-chat-serving
+    title: 大语言模型聊天服务
+    primary_family: ai-vector
+  - id: rag-assistant
+    title: RAG 助手
+    primary_family: ai-vector
+  - id: code-assistant
+    title: 代码助手
+    primary_family: ai-vector
+  - id: vector-database
+    title: 向量数据库
+    primary_family: ai-vector
+  - id: embedding-index-pipeline
+    title: 嵌入与索引流水线
+    primary_family: ai-vector
+  - id: inference-gateway
+    title: 推理网关
+    primary_family: ai-vector
+  - id: gpu-scheduler
+    title: GPU 调度器
+    primary_family: ai-vector
+
+exclusions:
+  - id: bitly
+    canonical_case_id: url-shortener
+    rationale: 这是品牌化题目，已由“短链接服务”的规范目标模型覆盖。
+  - id: twitter
+    canonical_case_id: social-news-feed
+    rationale: 这是品牌化题目，已由“社交信息流”的规范目标模型覆盖。
+  - id: whatsapp
+    canonical_case_id: chat-messenger
+    rationale: 这是品牌化题目，已由“聊天与即时通信”的规范目标模型覆盖。
+  - id: dropbox
+    canonical_case_id: cloud-file-sync
+    rationale: 这是品牌化题目，已由“云文件同步”的规范目标模型覆盖。
+  - id: youtube
+    canonical_case_id: video-on-demand
+    rationale: 这是品牌化题目，已由“视频点播”的规范目标模型覆盖。
+  - id: uber
+    canonical_case_id: ride-hailing-dispatch
+    rationale: 这是品牌化题目，已由“网约车调度”的规范目标模型覆盖。
+  - id: ticketmaster
+    canonical_case_id: ticketing
+    rationale: 这是品牌化题目，已由“票务系统”的规范目标模型覆盖。
+  - id: robinhood
+    canonical_case_id: trading-brokerage
+    rationale: 这是品牌化题目，已由“证券交易与经纪系统”的规范目标模型覆盖。
+  - id: chatgpt
+    canonical_case_id: llm-chat-serving
+    rationale: 这是品牌化题目，已由“大语言模型聊天服务”的规范目标模型覆盖。

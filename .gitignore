@@ -1,2 +1,24 @@
 .worktrees/
 .superpowers/
+
+# Go build and test outputs.
+/bin/**
+!/bin/**/
+/build/**
+!/build/**/
+/dist/**
+!/dist/**/
+*.test
+coverage.out
+
+# Local operating-system files.
+.DS_Store
+
+# Temporary evidence. Release evidence remains committed.
+/evidence/tmp/**
+!/evidence/tmp/**/
+/evidence/work/**
+!/evidence/work/**/
+
+# Preserve repository directory sentinels.
+!**/.gitkeep

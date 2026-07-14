@@ -1,0 +1,39 @@
+schema_version: 1
+
+sources:
+  - id: source-bytebytego-system-design-interview
+    title: ByteByteGo System Design Interview
+    url: https://bytebytego.com/courses/system-design-interview
+    kind: catalog
+    license_note: 仅用于核对公开题型目录；不复制来源内容，并遵守来源的许可与引用边界。
+    accessed_at: 2026-07-14
+  - id: source-educative-grokking-modern-system-design
+    title: Educative Grokking Modern System Design Interview
+    url: https://www.educative.io/courses/grokking-the-system-design-interview
+    kind: catalog
+    license_note: 仅用于核对公开题型目录；不复制来源内容，并遵守来源的许可与引用边界。
+    accessed_at: 2026-07-14
+  - id: source-hello-interview-problem-breakdowns
+    title: Hello Interview Problem Breakdowns
+    url: https://www.hellointerview.com/learn/system-design/in-a-hurry/problem-breakdowns
+    kind: catalog
+    license_note: 仅用于核对公开题型目录；不复制来源内容，并遵守来源的许可与引用边界。
+    accessed_at: 2026-07-14
+  - id: source-system-design-primer
+    title: System Design Primer
+    url: https://github.com/donnemartin/system-design-primer
+    kind: catalog
+    license_note: 仅用于核对公开题型目录；不复制来源内容，并遵守来源的许可与引用边界。
+    accessed_at: 2026-07-14
+  - id: source-google-sre-book
+    title: Google SRE Book table of contents
+    url: https://sre.google/sre-book/table-of-contents/
+    kind: engineering-guide
+    license_note: 仅用于核对工程维度；不复制来源内容，并遵守来源的许可与引用边界。
+    accessed_at: 2026-07-14
+  - id: source-aws-well-architected-pillars
+    title: AWS Well-Architected Six Pillars
+    url: https://docs.aws.amazon.com/wellarchitected/latest/framework/the-pillars-of-the-framework.html
+    kind: architecture-framework
+    license_note: 仅用于核对架构维度；不复制来源内容，并遵守来源的许可与引用边界。
+    accessed_at: 2026-07-14
