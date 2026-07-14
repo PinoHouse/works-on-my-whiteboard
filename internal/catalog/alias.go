@@ -19,6 +19,7 @@ type aliasKey struct {
 
 type AliasSet struct {
 	terminals map[aliasKey]string
+	entries   []Alias
 }
 
 func NewAliasSet(aliases []Alias) (AliasSet, error) {
@@ -47,7 +48,12 @@ func NewAliasSet(aliases []Alias) (AliasSet, error) {
 	}
 
 	sortAliasKeys(keys)
-	set := AliasSet{terminals: make(map[aliasKey]string, len(aliases))}
+	entries := append([]Alias{}, aliases...)
+	sortAliases(entries)
+	set := AliasSet{
+		terminals: make(map[aliasKey]string, len(aliases)),
+		entries:   entries,
+	}
 	state := make(map[aliasKey]uint8, len(aliases))
 	var cacheTerminal func(aliasKey) (string, error)
 	cacheTerminal = func(key aliasKey) (string, error) {
@@ -79,6 +85,12 @@ func NewAliasSet(aliases []Alias) (AliasSet, error) {
 		}
 	}
 	return set, nil
+}
+
+func (a AliasSet) Entries() []Alias {
+	entries := make([]Alias, len(a.entries))
+	copy(entries, a.entries)
+	return entries
 }
 
 func (a AliasSet) ValidateCanonical(canonical map[EntityKind]map[string]struct{}) error {
@@ -134,5 +146,17 @@ func sortAliasKeys(keys []aliasKey) {
 			return keys[left].kind < keys[right].kind
 		}
 		return keys[left].from < keys[right].from
+	})
+}
+
+func sortAliases(aliases []Alias) {
+	sort.Slice(aliases, func(left, right int) bool {
+		if aliases[left].Kind != aliases[right].Kind {
+			return aliases[left].Kind < aliases[right].Kind
+		}
+		if aliases[left].From != aliases[right].From {
+			return aliases[left].From < aliases[right].From
+		}
+		return aliases[left].To < aliases[right].To
 	})
 }

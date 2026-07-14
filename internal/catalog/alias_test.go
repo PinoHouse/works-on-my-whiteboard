@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -53,6 +54,38 @@ func TestAliasSetResolve(t *testing.T) {
 				t.Errorf("Resolve(%q, %q) = %q, want %q", test.kind, test.id, got, test.want)
 			}
 		})
+	}
+}
+
+func TestAliasSetEntriesAreSortedAndDefensive(t *testing.T) {
+	aliases := []Alias{
+		{Kind: EntityKindSource, From: "source-old", To: "source-current"},
+		{Kind: EntityKindCase, From: "z-case", To: "case-current"},
+		{Kind: EntityKindPrinciple, From: "principle-old", To: "principle-current"},
+		{Kind: EntityKindCase, From: "a-case", To: "case-current"},
+		{Kind: EntityKindLab, From: "lab-old", To: "lab-current"},
+	}
+	set, err := NewAliasSet(aliases)
+	if err != nil {
+		t.Fatalf("NewAliasSet() error = %v", err)
+	}
+	aliases[0].From = "mutated-input"
+
+	want := []Alias{
+		{Kind: EntityKindCase, From: "a-case", To: "case-current"},
+		{Kind: EntityKindCase, From: "z-case", To: "case-current"},
+		{Kind: EntityKindLab, From: "lab-old", To: "lab-current"},
+		{Kind: EntityKindPrinciple, From: "principle-old", To: "principle-current"},
+		{Kind: EntityKindSource, From: "source-old", To: "source-current"},
+	}
+	first := set.Entries()
+	if !reflect.DeepEqual(first, want) {
+		t.Fatalf("Entries() = %#v, want %#v", first, want)
+	}
+	first[0].From = "mutated-output"
+	first = append(first, Alias{Kind: EntityKindCase, From: "extra", To: "case-current"})
+	if second := set.Entries(); !reflect.DeepEqual(second, want) {
+		t.Fatalf("Entries() after caller mutation = %#v, want %#v", second, want)
 	}
 }
 
