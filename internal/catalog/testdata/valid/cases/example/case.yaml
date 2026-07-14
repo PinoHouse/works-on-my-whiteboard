@@ -1,0 +1,6 @@
+schema_version: 1
+id: case-id
+title: Case
+primary_family: family-id
+required: true
+status: complete

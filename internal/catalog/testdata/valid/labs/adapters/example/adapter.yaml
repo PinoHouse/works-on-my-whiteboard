@@ -1,0 +1,6 @@
+schema_version: 1
+id: adapter-id
+title: Adapter
+status: complete
+interface: test-interface
+runtime: test-runtime

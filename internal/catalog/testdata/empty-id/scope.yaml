@@ -1,0 +1,6 @@
+schema_version: 1
+families:
+  - id: ""
+    title: Empty family ID
+cases: []
+exclusions: []

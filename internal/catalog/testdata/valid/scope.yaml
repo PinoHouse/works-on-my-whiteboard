@@ -1,0 +1,12 @@
+schema_version: 1
+families:
+  - id: family-id
+    title: Family
+cases:
+  - id: case-id
+    title: Manifest case
+    primary_family: family-id
+  - id: scope-only-case
+    title: Scope-only canonical case
+    primary_family: family-id
+exclusions: []

@@ -1,0 +1,5 @@
+schema_version: 1
+id: principle-id
+title: Principle
+required: true
+status: complete

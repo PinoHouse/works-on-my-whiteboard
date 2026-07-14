@@ -1,0 +1,5 @@
+schema_version: 1
+id: primitive-lab
+kind: primitive
+required: false
+status: draft

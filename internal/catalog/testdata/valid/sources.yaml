@@ -1,0 +1,8 @@
+schema_version: 1
+sources:
+  - id: source-id
+    title: Source
+    url: https://example.com
+    accessed_at: 2026-07-14
+    kind: guide
+    license_note: Test fixture

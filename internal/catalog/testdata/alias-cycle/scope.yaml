@@ -1,0 +1,7 @@
+schema_version: 1
+families: []
+cases:
+  - id: canonical-case
+    title: Canonical
+    primary_family: family-id
+exclusions: []

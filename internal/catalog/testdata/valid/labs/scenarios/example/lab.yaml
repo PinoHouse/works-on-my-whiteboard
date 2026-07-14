@@ -1,0 +1,5 @@
+schema_version: 1
+id: scenario-lab
+kind: scenario
+required: true
+status: complete

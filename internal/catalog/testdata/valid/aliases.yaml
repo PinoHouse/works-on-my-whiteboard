@@ -1,0 +1,14 @@
+schema_version: 1
+aliases:
+  - kind: case
+    from: legacy-case
+    to: scope-only-case
+  - kind: principle
+    from: legacy-principle
+    to: principle-id
+  - kind: lab
+    from: legacy-lab
+    to: scenario-lab
+  - kind: source
+    from: legacy-source
+    to: source-id
