@@ -32,17 +32,16 @@ func BuildRequiredMatrix(c *catalog.Catalog) ([]MatrixCell, []Diagnostic) {
 	adapters := adapterManifestsByID(c)
 	labs := labManifestsByID(c)
 	coverage := ComputeCoverage(c)
-	requiredLabs := makeStringSet(coverage.RequiredScenarioLabs...)
-	for _, labID := range coverage.RequiredPrimitiveLabs {
-		requiredLabs.add(labID)
-	}
+	requiredScenarioLabs := makeStringSet(coverage.RequiredScenarioLabs...)
+	requiredPrimitiveLabs := makeStringSet(coverage.RequiredPrimitiveLabs...)
 	seenCells := make(map[[6]string]struct{})
 
 	for _, labID := range sortedLabManifestIDs(labs) {
 		lab := labs[labID]
-		labMatrixEligible := requiredLabs.contains(lab.ID) &&
+		labInRequiredCategory := (requiredScenarioLabs.contains(lab.ID) && lab.Kind == catalog.LabKindScenario) ||
+			(requiredPrimitiveLabs.contains(lab.ID) && lab.Kind == catalog.LabKindPrimitive)
+		labMatrixEligible := labInRequiredCategory &&
 			lab.Status == catalog.LifecycleStatusComplete &&
-			(lab.Kind == catalog.LabKindScenario || lab.Kind == catalog.LabKindPrimitive) &&
 			len(missingCompleteLabFields(lab)) == 0
 		bindings, bindingsByID := collectMatrixBindings(lab)
 		for _, bindingID := range sortedStringMapKeys(bindingsByID) {

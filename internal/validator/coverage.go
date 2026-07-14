@@ -126,22 +126,23 @@ func ComputeCoverage(c *catalog.Catalog) Coverage {
 	}
 
 	requiredAdapters := makeStringSet()
-	requiredLabs := makeStringSet()
-	for labID := range requiredScenarioLabs {
-		requiredLabs.add(labID)
-	}
-	for labID := range requiredPrimitiveLabs {
-		requiredLabs.add(labID)
-	}
-	for _, labID := range requiredLabs.sorted() {
-		lab, exists := labs[labID]
-		if !exists {
-			continue
-		}
-		for _, run := range lab.RequiredRuns {
-			for _, adapter := range run.Adapters {
-				if adapter.Required {
-					requiredAdapters.add(adapter.ID)
+	for _, category := range []struct {
+		ids  stringSet
+		kind catalog.LabKind
+	}{
+		{ids: requiredScenarioLabs, kind: catalog.LabKindScenario},
+		{ids: requiredPrimitiveLabs, kind: catalog.LabKindPrimitive},
+	} {
+		for _, labID := range category.ids.sorted() {
+			lab, exists := labs[labID]
+			if !exists || lab.Kind != category.kind {
+				continue
+			}
+			for _, run := range lab.RequiredRuns {
+				for _, adapter := range run.Adapters {
+					if adapter.Required {
+						requiredAdapters.add(adapter.ID)
+					}
 				}
 			}
 		}

@@ -157,6 +157,59 @@ func TestBuildRequiredMatrixProjectsOnlyRequiredCompleteLabs(t *testing.T) {
 	}
 }
 
+func TestBuildRequiredMatrixRejectsPrimitiveLabFromScenarioOnlyClosure(t *testing.T) {
+	c := validCatalog()
+	addOptionalPrimitiveLabWithAdapter(c, catalog.LifecycleStatusComplete, catalog.LifecycleStatusComplete)
+	manifest := c.Cases["case-a"]
+	manifest.Labs = append(manifest.Labs, "primitive-lab-optional")
+	c.Cases[manifest.ID] = manifest
+
+	report := Validate(c, ModeDevelopment)
+	assertDiagnosticCode(t, report.Diagnostics, CodeUnknownReference)
+	assertDiagnosticCode(t, report.Diagnostics, CodeDependencyIncomplete)
+	if makeStringSet(report.Coverage.RequiredAdapters...).contains("adapter-optional") {
+		t.Fatalf("required adapters = %#v, wrong-kind scenario edge must not require adapter-optional", report.Coverage.RequiredAdapters)
+	}
+	assertNoMatrixCellsForRun(t, report.Matrix, "primitive-lab-optional", "run-principle-optional")
+}
+
+func TestBuildRequiredMatrixRejectsScenarioLabFromPrimitiveOnlyClosure(t *testing.T) {
+	c := validCatalog()
+	addOptionalScenarioLab(c)
+	manifest := c.Principles["principle-a"]
+	manifest.Labs = append(manifest.Labs, "scenario-lab-optional")
+	c.Principles[manifest.ID] = manifest
+
+	report := Validate(c, ModeDevelopment)
+	assertDiagnosticCode(t, report.Diagnostics, CodeUnknownReference)
+	assertDiagnosticCode(t, report.Diagnostics, CodeDependencyIncomplete)
+	if makeStringSet(report.Coverage.RequiredAdapters...).contains("adapter-scenario-optional") {
+		t.Fatalf("required adapters = %#v, wrong-kind primitive edge must not require adapter-scenario-optional", report.Coverage.RequiredAdapters)
+	}
+	assertNoMatrixCellsForRun(t, report.Matrix, "scenario-lab-optional", "run-case-optional")
+}
+
+func TestBuildRequiredMatrixKeepsValidPrimitiveClosureDespiteWrongScenarioReference(t *testing.T) {
+	c := validCatalog()
+	addOptionalPrimitiveLabWithAdapter(c, catalog.LifecycleStatusComplete, catalog.LifecycleStatusComplete)
+	principle := c.Principles["principle-optional"]
+	principle.Required = true
+	principle.Status = catalog.LifecycleStatusComplete
+	principle.Dimensions = []catalog.DimensionID{"contracts-data-invariants"}
+	c.Principles[principle.ID] = principle
+	manifest := c.Cases["case-a"]
+	manifest.Labs = append(manifest.Labs, "primitive-lab-optional")
+	c.Cases[manifest.ID] = manifest
+
+	report := Validate(c, ModeDevelopment)
+	assertDiagnosticCode(t, report.Diagnostics, CodeUnknownReference)
+	assertDiagnosticCode(t, report.Diagnostics, CodeDependencyIncomplete)
+	if !makeStringSet(report.Coverage.RequiredAdapters...).contains("adapter-optional") {
+		t.Fatalf("required adapters = %#v, want adapter-optional from valid primitive closure", report.Coverage.RequiredAdapters)
+	}
+	assertHasMatrixCellsForRun(t, report.Matrix, "primitive-lab-optional", "run-principle-optional")
+}
+
 func TestBuildRequiredMatrixRequiresCompleteLabContractForCells(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -320,6 +373,60 @@ func addOptionalPrimitiveLabWithAdapter(c *catalog.Catalog, labStatus, adapterSt
 		Title:         "Optional adapter",
 		Status:        adapterStatus,
 		Interface:     "interface-optional",
+		Runtime:       "docker",
+		Sources:       []string{"source-a"},
+	}
+}
+
+func addOptionalScenarioLab(c *catalog.Catalog) {
+	c.Cases["case-optional"] = catalog.CaseManifest{
+		SchemaVersion: 1,
+		ID:            "case-optional",
+		Title:         "Optional case",
+		PrimaryFamily: "addressing-traffic",
+		Status:        catalog.LifecycleStatusDraft,
+		Claims: []catalog.Claim{{
+			ID:        "claim-case-optional",
+			Statement: "Optional case claim.",
+		}},
+		Labs: []string{"scenario-lab-optional"},
+		EvidenceRequirements: []catalog.EvidenceRequirement{{
+			Claim: "claim-case-optional",
+			Lab:   "scenario-lab-optional",
+		}},
+		Sources: []string{"source-a"},
+	}
+	c.Labs["scenario-lab-optional"] = catalog.LabManifest{
+		SchemaVersion:   1,
+		ID:              "scenario-lab-optional",
+		Kind:            catalog.LabKindScenario,
+		Status:          catalog.LifecycleStatusComplete,
+		Implementations: []string{"scenario-optional-a", "scenario-optional-b"},
+		CaseBindings: []catalog.CaseBinding{{
+			ID:         "binding-case-optional",
+			CaseID:     "case-optional",
+			Claim:      "claim-case-optional",
+			Workload:   "workload-case-optional",
+			Assertions: []string{"assertion-case-optional"},
+		}},
+		RequiredRuns: []catalog.RequiredRun{{
+			ID:       "run-case-optional",
+			Binding:  "binding-case-optional",
+			Baseline: "scenario-optional-a",
+			Variants: []string{"scenario-optional-b"},
+			Workload: "workload-case-optional",
+			Faults:   []string{"fault-case-optional"},
+			Adapters: []catalog.AdapterRequirement{{ID: "adapter-scenario-optional", Required: true}},
+		}},
+		Metrics: []string{"metric-case-optional"},
+		Sources: []string{"source-a"},
+	}
+	c.Adapters["adapter-scenario-optional"] = catalog.AdapterManifest{
+		SchemaVersion: 1,
+		ID:            "adapter-scenario-optional",
+		Title:         "Optional scenario adapter",
+		Status:        catalog.LifecycleStatusComplete,
+		Interface:     "interface-scenario-optional",
 		Runtime:       "docker",
 		Sources:       []string{"source-a"},
 	}
@@ -527,4 +634,14 @@ func assertNoMatrixCellsForRun(t *testing.T, matrix []MatrixCell, labID, runID s
 			t.Fatalf("invalid required run produced matrix cell: %#v", cell)
 		}
 	}
+}
+
+func assertHasMatrixCellsForRun(t *testing.T, matrix []MatrixCell, labID, runID string) {
+	t.Helper()
+	for _, cell := range matrix {
+		if cell.LabID == labID && cell.RequiredRunID == runID {
+			return
+		}
+	}
+	t.Fatalf("matrix = %#v, want cells for lab %q run %q", matrix, labID, runID)
 }
