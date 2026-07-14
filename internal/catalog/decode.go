@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"reflect"
+	"strconv"
 	"strings"
 
 	"go.yaml.in/yaml/v3"
@@ -34,9 +35,10 @@ func DecodeStrict[T any](path string, data []byte) (T, error) {
 		return document, fmt.Errorf("%s: %w", path, err)
 	}
 
-	version, ok := unsignedField(document, "SchemaVersion")
+	versionNode := mappingNodeValue(resolvedYAMLNode(&source), "schema_version")
+	version, ok := schemaVersionFromNode(versionNode)
 	if !ok || version != supportedSchemaVersion {
-		return document, fmt.Errorf("%s: line %d: unsupported schema_version %d", path, mappingValueLine(&source, "schema_version"), version)
+		return document, fmt.Errorf("%s: line %d: unsupported schema_version %s", path, mappingValueLine(&source, "schema_version"), schemaVersionText(versionNode))
 	}
 	if line, ok := emptyStableIDLine(document, &source); ok {
 		return document, fmt.Errorf("%s: line %d: empty stable ID", path, line)
@@ -45,22 +47,26 @@ func DecodeStrict[T any](path string, data []byte) (T, error) {
 	return document, nil
 }
 
-func unsignedField(document any, name string) (uint64, bool) {
-	value := reflect.ValueOf(document)
-	for value.IsValid() && value.Kind() == reflect.Pointer {
-		if value.IsNil() {
-			return 0, false
-		}
-		value = value.Elem()
-	}
-	if !value.IsValid() || value.Kind() != reflect.Struct {
+func schemaVersionFromNode(node *yaml.Node) (uint64, bool) {
+	valueNode := resolvedYAMLNode(node)
+	if valueNode == nil || valueNode.Kind != yaml.ScalarNode || valueNode.Tag != "!!int" {
 		return 0, false
 	}
-	field := value.FieldByName(name)
-	if !field.IsValid() || !field.CanUint() {
+
+	plain := strings.ReplaceAll(valueNode.Value, "_", "")
+	value, err := strconv.ParseUint(plain, 0, 64)
+	if err != nil {
 		return 0, false
 	}
-	return field.Uint(), true
+	return value, true
+}
+
+func schemaVersionText(node *yaml.Node) string {
+	valueNode := resolvedYAMLNode(node)
+	if valueNode == nil {
+		return "0"
+	}
+	return valueNode.Value
 }
 
 func mappingValueLine(document *yaml.Node, key string) int {

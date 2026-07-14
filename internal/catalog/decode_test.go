@@ -39,6 +39,7 @@ func TestDecodeStrict(t *testing.T) {
 		{name: "duplicate key", path: "testdata/duplicate-key/manifest.yaml", want: "mapping key \"id\" already defined"},
 		{name: "multiple documents", path: "testdata/multiple-docs/manifest.yaml", want: "multiple YAML documents"},
 		{name: "unsupported schema", path: "testdata/unsupported-schema/manifest.yaml", want: "unsupported schema_version 2"},
+		{name: "fractional schema version", path: "testdata/unsupported-schema/fractional.yaml", want: "unsupported schema_version 1.5"},
 		{name: "empty stable ID", path: "testdata/empty-id/manifest.yaml", want: "empty stable ID"},
 		{name: "trailing content", path: "testdata/trailing-content/manifest.yaml", want: "could not find expected ':'"},
 	}
