@@ -493,6 +493,73 @@ func TestValidateCompleteContractRejectsEmptyNestedFields(t *testing.T) {
 	}
 }
 
+func TestValidateCompleteRunRequiresFaultSchedulePresenceButAllowsEmpty(t *testing.T) {
+	tests := []struct {
+		name        string
+		faults      []string
+		wantMissing bool
+	}{
+		{name: "omitted", faults: nil, wantMissing: true},
+		{name: "explicit empty", faults: []string{}, wantMissing: false},
+		{name: "nonempty", faults: []string{"fault-a"}, wantMissing: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			c := validCatalog()
+			lab := c.Labs["primitive-lab-a"]
+			lab.RequiredRuns[0].Faults = test.faults
+			c.Labs[lab.ID] = lab
+			diagnostics := Validate(c, ModeDevelopment).Diagnostics
+			if test.wantMissing {
+				assertDiagnosticCode(t, diagnostics, CodeCompleteContractEmpty)
+				return
+			}
+			assertNoDiagnosticCode(t, diagnostics, CodeCompleteContractEmpty)
+		})
+	}
+}
+
+func TestValidateUsesDedicatedLabMetricGrammar(t *testing.T) {
+	c := validCatalog()
+	lab := c.Labs["primitive-lab-a"]
+	lab.Metrics = []string{
+		"requests.total",
+		"probe_initial",
+		"tokens-remaining",
+		"reference.mismatch_count",
+	}
+	c.Labs[lab.ID] = lab
+	assertNoDiagnosticCode(t, Validate(c, ModeDevelopment).Diagnostics, CodeInvalidStableID)
+
+	invalid := []string{
+		"",
+		"Requests.total",
+		".requests",
+		"requests.",
+		"requests..total",
+		"requests__total",
+		"requests.-total",
+	}
+	for _, metric := range invalid {
+		t.Run(metric, func(t *testing.T) {
+			c := validCatalog()
+			lab := c.Labs["primitive-lab-a"]
+			lab.Metrics = []string{metric}
+			c.Labs[lab.ID] = lab
+			assertDiagnosticCode(t, Validate(c, ModeDevelopment).Diagnostics, CodeInvalidStableID)
+		})
+	}
+}
+
+func TestLabMetricGrammarDoesNotRelaxGraphStableIDs(t *testing.T) {
+	c := validCatalog()
+	lab := c.Labs["primitive-lab-a"]
+	lab.PrincipleBindings[0].ID = "binding.with-dot"
+	lab.RequiredRuns[0].Binding = "binding.with-dot"
+	c.Labs[lab.ID] = lab
+	assertDiagnosticCode(t, Validate(c, ModeDevelopment).Diagnostics, CodeInvalidStableID)
+}
+
 func TestValidateAllowsDraftAdapterToOmitConditionalFields(t *testing.T) {
 	c := validCatalog()
 	lab := c.Labs["scenario-lab-a"]

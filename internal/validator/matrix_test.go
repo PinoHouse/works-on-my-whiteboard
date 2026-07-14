@@ -252,6 +252,24 @@ func TestBuildRequiredMatrixRequiresCompleteLabContractForCells(t *testing.T) {
 	}
 }
 
+func TestBuildRequiredMatrixAllowsExplicitEmptyFaultSchedule(t *testing.T) {
+	c := validCatalog()
+	lab := c.Labs["primitive-lab-a"]
+	lab.RequiredRuns[0].Faults = []string{}
+	c.Labs[lab.ID] = lab
+
+	matrix, diagnostics := BuildRequiredMatrix(c)
+	if len(diagnostics) != 0 {
+		t.Fatalf("BuildRequiredMatrix() diagnostics = %#v, want none", diagnostics)
+	}
+	assertHasMatrixCellsForRun(t, matrix, lab.ID, lab.RequiredRuns[0].ID)
+	for _, cell := range matrix {
+		if cell.LabID == lab.ID && cell.RequiredRunID == lab.RequiredRuns[0].ID && cell.Faults == nil {
+			t.Fatalf("matrix cell faults = nil, want explicit empty normalized slice: %#v", cell)
+		}
+	}
+}
+
 func TestBuildRequiredMatrixRequiresCompleteAdapterContractForCells(t *testing.T) {
 	c := validCatalog()
 	adapter := c.Adapters["adapter-a"]

@@ -37,3 +37,9 @@ sources:
     kind: architecture-framework
     license_note: 仅用于核对架构维度；不复制来源内容，并遵守来源的许可与引用边界。
     accessed_at: 2026-07-14
+  - id: source-rfc-3290-token-bucket
+    title: RFC 3290 Appendix A — Token Bucket
+    url: https://www.rfc-editor.org/rfc/rfc3290.html#appendix-A
+    kind: rfc
+    license_note: 用于引用令牌桶的标准定义；仅转述定义并链接原文。
+    accessed_at: 2026-07-14

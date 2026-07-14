@@ -9,6 +9,7 @@ import (
 )
 
 var stableIDPattern = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
+var labMetricIDPattern = regexp.MustCompile(`^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$`)
 
 func validateSchemaContracts(c *catalog.Catalog) []Diagnostic {
 	if c == nil {
@@ -163,7 +164,7 @@ func validateSchemaContracts(c *catalog.Catalog) []Diagnostic {
 			}
 		}
 		for _, metricID := range manifest.Metrics {
-			appendStableIDDiagnostic(&diagnostics, manifest.ID, "lab metric id", metricID)
+			appendLabMetricIDDiagnostic(&diagnostics, manifest.ID, metricID)
 		}
 		for _, sourceID := range manifest.Sources {
 			appendStableIDDiagnostic(&diagnostics, manifest.ID, "lab source reference", sourceID)
@@ -208,6 +209,17 @@ func appendStableIDDiagnostic(diagnostics *[]Diagnostic, entityID, field, value 
 		CodeInvalidStableID,
 		entityID,
 		fmt.Sprintf("%s %q does not match ^[a-z][a-z0-9-]*$", field, value),
+	))
+}
+
+func appendLabMetricIDDiagnostic(diagnostics *[]Diagnostic, entityID, value string) {
+	if labMetricIDPattern.MatchString(value) {
+		return
+	}
+	*diagnostics = append(*diagnostics, errorDiagnostic(
+		CodeInvalidStableID,
+		entityID,
+		fmt.Sprintf("lab metric id %q does not match %s", value, labMetricIDPattern.String()),
 	))
 }
 
@@ -323,7 +335,9 @@ func missingCompleteLabFields(manifest catalog.LabManifest) []string {
 		appendEmpty(&missing, fmt.Sprintf("required_runs[%d].variants", index), len(run.Variants))
 		appendBlankStringItems(&missing, fmt.Sprintf("required_runs[%d].variants", index), run.Variants)
 		appendBlank(&missing, fmt.Sprintf("required_runs[%d].workload", index), run.Workload)
-		appendEmpty(&missing, fmt.Sprintf("required_runs[%d].faults", index), len(run.Faults))
+		if run.Faults == nil {
+			missing = append(missing, fmt.Sprintf("required_runs[%d].faults", index))
+		}
 		appendBlankStringItems(&missing, fmt.Sprintf("required_runs[%d].faults", index), run.Faults)
 		for adapterIndex, adapter := range run.Adapters {
 			appendBlank(&missing, fmt.Sprintf("required_runs[%d].adapters[%d].id", index, adapterIndex), adapter.ID)

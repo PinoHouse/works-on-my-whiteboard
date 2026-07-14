@@ -1,0 +1,41 @@
+schema_version: 1
+id: token-bucket
+kind: primitive
+required: true
+status: complete
+implementations:
+  - token-bucket-reference-model
+  - token-bucket
+principle_bindings:
+  - id: token-bucket-burst-boundary
+    principle_id: token-bucket
+    claim: token-bucket-bounds-burst-and-average-rate
+    workload: burst-refill-boundary
+    assertions:
+      - initial-burst-bounded
+      - pre-boundary-denied
+      - boundary-refills-one
+      - capacity-never-exceeded
+      - implementation-matches-reference
+required_runs:
+  - id: burst-and-refill-boundary
+    binding: token-bucket-burst-boundary
+    baseline: token-bucket-reference-model
+    variants:
+      - token-bucket
+    workload: burst-refill-boundary
+    faults: []
+metrics:
+  - requests.total
+  - requests.allowed
+  - requests.denied
+  - tokens.capacity
+  - tokens.remaining
+  - tokens.max_observed
+  - probe.initial_burst_allowed
+  - probe.immediate_denied
+  - probe.pre_boundary_denied
+  - probe.boundary_allowed
+  - reference.mismatches
+sources:
+  - source-rfc-3290-token-bucket

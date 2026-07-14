@@ -1,0 +1,23 @@
+schema_version: 1
+id: token-bucket
+title: 令牌桶的突发与平均速率约束
+required: true
+status: complete
+dimensions:
+  - capacity-cost-skew
+  - contracts-data-invariants
+  - consistency-ordering-time
+  - async-backpressure-fairness
+  - evidence-validation
+claims:
+  - id: token-bucket-bounds-burst-and-average-rate
+    statement: 有限容量与固定补充间隔共同限制瞬时突发量和长期平均放行速率。
+  - id: token-bucket-standard-definition
+    statement: 令牌桶以容量、可用令牌和补充速率描述可积累但有上界的发送许可。
+labs:
+  - token-bucket
+evidence_requirements:
+  - claim: token-bucket-bounds-burst-and-average-rate
+    lab: token-bucket
+sources:
+  - source-rfc-3290-token-bucket
