@@ -2,6 +2,7 @@ package tokenbucket
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"reflect"
 	"sort"
@@ -15,6 +16,28 @@ import (
 var runImplementationIDs = []string{
 	"token-bucket-reference-model",
 	"token-bucket",
+}
+
+type firstRefillOnlySubject struct {
+	start time.Time
+}
+
+func (s *firstRefillOnlySubject) Take(now time.Time, amount uint64) (Decision, error) {
+	offset := now.Sub(s.start)
+	switch {
+	case offset == 0 && amount == runBurstAmount:
+		return Decision{Allowed: true, Remaining: 0}, nil
+	case offset == 0 && amount == runUnitAmount:
+		return Decision{Allowed: false, Remaining: 0, RetryAfter: runRefillEvery}, nil
+	case offset == runRefillEvery-time.Nanosecond && amount == runUnitAmount:
+		return Decision{Allowed: false, Remaining: 0, RetryAfter: time.Nanosecond}, nil
+	case offset == runRefillEvery && amount == runUnitAmount:
+		return Decision{Allowed: true, Remaining: 0}, nil
+	case offset == 3*runRefillEvery && amount == 2*runUnitAmount:
+		return Decision{Allowed: false, Remaining: 0, RetryAfter: runRefillEvery}, nil
+	default:
+		return Decision{}, fmt.Errorf("unexpected probe at %s for amount %d", offset, amount)
+	}
 }
 
 func TestBuildRunSpecRejectsUnknownImplementations(t *testing.T) {
@@ -119,6 +142,53 @@ func TestBuildRunSpecReturnsFreshIndependentValues(t *testing.T) {
 	}
 	if second.Assertions[0].ID != "initial-burst-bounded" {
 		t.Fatalf("assertion slices alias: second first assertion = %q", second.Assertions[0].ID)
+	}
+}
+
+func TestRunOracleRejectsFirstRefillOnlySubject(t *testing.T) {
+	for _, implementationID := range runImplementationIDs {
+		t.Run(implementationID, func(t *testing.T) {
+			start := time.Unix(0, 0).UTC()
+			spec, err := buildRunSpecWithSubject(implementationID, &firstRefillOnlySubject{start: start})
+			if err != nil {
+				t.Fatalf("buildRunSpecWithSubject() error = %v", err)
+			}
+
+			result, runErr := harness.NewRunner().Run(context.Background(), spec)
+			if runErr == nil {
+				t.Fatalf("Run() error = nil; result=%#v", result)
+			}
+			if result.Status == harness.StatusPassed {
+				t.Fatalf("Run() status = %q, want non-passed", result.Status)
+			}
+			assertion, exists := assertionResultByID(result.Assertions, "implementation-matches-reference")
+			if !exists {
+				t.Fatalf("implementation-matches-reference assertion missing: %#v", result.Assertions)
+			}
+			if assertion.Passed {
+				t.Fatalf("implementation-matches-reference passed for first-refill-only subject")
+			}
+			for _, other := range result.Assertions {
+				if other.ID != assertion.ID && !other.Passed {
+					t.Fatalf("unrelated assertion %q failed: %s", other.ID, other.Message)
+				}
+			}
+			mismatches, exists := metricValueByName(result.Metrics, "reference.mismatches")
+			if !exists || mismatches != 1 {
+				t.Fatalf("reference.mismatches = %d, %t; want 1, true", mismatches, exists)
+			}
+		})
+	}
+}
+
+func TestFrozenProbeOracleRequiresMultiIntervalRefill(t *testing.T) {
+	got, exists := frozenProbeDecision(probeMultiInterval)
+	if !exists {
+		t.Fatal("multi-interval probe has no frozen oracle decision")
+	}
+	want := Decision{Allowed: true, Remaining: 0}
+	if got != want {
+		t.Fatalf("multi-interval frozen decision = %#v, want %#v", got, want)
 	}
 }
 
@@ -268,4 +338,22 @@ func TestLabManifestMatchesExecutableRun(t *testing.T) {
 	if !reflect.DeepEqual(resultMetricNames, wantMetricNames) {
 		t.Fatalf("result metric names = %#v, manifest names = %#v", resultMetricNames, wantMetricNames)
 	}
+}
+
+func assertionResultByID(results []harness.AssertionResult, id string) (harness.AssertionResult, bool) {
+	for _, result := range results {
+		if result.ID == id {
+			return result, true
+		}
+	}
+	return harness.AssertionResult{}, false
+}
+
+func metricValueByName(metrics []harness.Metric, name string) (int64, bool) {
+	for _, metric := range metrics {
+		if metric.Name == name {
+			return metric.Value, true
+		}
+	}
+	return 0, false
 }

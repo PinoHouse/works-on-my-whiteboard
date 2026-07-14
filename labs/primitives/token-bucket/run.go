@@ -2,6 +2,7 @@ package tokenbucket
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"time"
@@ -34,7 +35,6 @@ const (
 
 type experimentState struct {
 	subject     decisionTaker
-	reference   *referenceBucket
 	initialized bool
 	maxObserved uint64
 }
@@ -55,10 +55,19 @@ func BuildRunSpec(implementationID string) (harness.RunSpec, error) {
 	default:
 		return harness.RunSpec{}, fmt.Errorf("unknown token bucket implementation %q", implementationID)
 	}
+	return buildRunSpecWithSubject(implementationID, subject)
+}
 
+func buildRunSpecWithSubject(implementationID string, subject decisionTaker) (harness.RunSpec, error) {
+	if implementationID != referenceImplementationID && implementationID != bucketImplementationID {
+		return harness.RunSpec{}, fmt.Errorf("unknown token bucket implementation %q", implementationID)
+	}
+	if subject == nil {
+		return harness.RunSpec{}, errors.New("token bucket run subject is nil")
+	}
+	start := time.Unix(0, 0).UTC()
 	state := &experimentState{
 		subject:     subject,
-		reference:   newReferenceBucket(config, start),
 		maxObserved: runCapacity,
 	}
 	return harness.RunSpec{
@@ -131,9 +140,9 @@ func (s *experimentState) applyProbe(runtime *harness.Runtime, amount uint64, ki
 	if err != nil {
 		return fmt.Errorf("subject take: %w", err)
 	}
-	want, err := s.reference.Take(now, amount)
-	if err != nil {
-		return fmt.Errorf("reference take: %w", err)
+	want, exists := frozenProbeDecision(kind)
+	if !exists {
+		return fmt.Errorf("probe kind %d has no frozen oracle decision", kind)
 	}
 	if got != want {
 		if err := runtime.Recorder.Add("reference.mismatches", "count", 1); err != nil {
@@ -160,6 +169,23 @@ func (s *experimentState) applyProbe(runtime *harness.Runtime, amount uint64, ki
 		}
 	}
 	return recordProbeOutcome(runtime.Recorder, kind, got)
+}
+
+func frozenProbeDecision(kind probeKind) (Decision, bool) {
+	switch kind {
+	case probeInitialBurst:
+		return Decision{Allowed: true, Remaining: 0}, true
+	case probeImmediateDenial:
+		return Decision{Allowed: false, Remaining: 0, RetryAfter: runRefillEvery}, true
+	case probePreBoundaryDenial:
+		return Decision{Allowed: false, Remaining: 0, RetryAfter: time.Nanosecond}, true
+	case probeBoundaryAllowance:
+		return Decision{Allowed: true, Remaining: 0}, true
+	case probeMultiInterval:
+		return Decision{Allowed: true, Remaining: 0}, true
+	default:
+		return Decision{}, false
+	}
 }
 
 func initializeRunMetrics(recorder *harness.Recorder) error {
