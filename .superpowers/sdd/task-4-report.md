@@ -364,3 +364,69 @@ baseline_total=75; complete_total=0; missing_case_ids=75
 ```
 
 修复代码已完成 fresh 验证，当前状态为待独立 reviewer fresh rereview；本报告不提前声称 Approved。
+
+## Fresh rereview：resolved repository root
+
+第二轮 fresh rereview 结论为 Critical 0、Important 1、Minor 0，未批准。唯一 Important 是 `ValidateRepository` 虽已计算 `rootReal`，但仍把未解析的 `rootAbsolute` 交给 `WalkDir`。当 CLI 的 `--root` 本身是目录 symlink 时，`WalkDir` 把入口视为 symlink 而不下钻，仓库 Markdown link checks 因此 fail-open。
+
+### RED
+
+先创建真实 root 的 `README.md`，其中包含缺失相对目标；同一仓库分别通过真实路径和目录 symlink 调用。目标契约是两次都返回完全相同的 `missing_link_target`。
+
+```text
+$ go test ./internal/content -run '^TestValidateRepositoryResolvesRootSymlinkBeforeWalking$' -count=1
+exit 1
+symlink-root diagnostics=[]
+want direct-root diagnostics=[missing_link_target path=README.md]
+```
+
+### GREEN
+
+`ValidateRepository` 现在只用 `rootAbsolute` 解析信任锚；`EvalSymlinks` 成功后，将清理后的 `rootReal` 统一用于：
+
+- case/principle canonical README 安全读取；
+- Markdown discover / load / relative path；
+- link target containment、cache key 与 fragment 解析。
+
+root 自身作为用户选择的信任锚允许是 symlink，但 resolved root 之下的 canonical 中间 symlink 拒绝规则保持不变。
+
+```text
+$ go test ./internal/content -run '^TestValidateRepositoryResolvesRootSymlinkBeforeWalking$' -count=1
+exit 0
+ok github.com/PinoHouse/works-on-my-whiteboard/internal/content 0.984s
+```
+
+### 修复后 fresh 验证
+
+```text
+$ go test ./internal/content -count=1
+exit 0
+ok github.com/PinoHouse/works-on-my-whiteboard/internal/content 2.068s
+
+$ go test ./... -count=1
+exit 0
+catalog 0.965s; cli 0.619s; content 1.724s; validator 1.411s
+
+$ go test -race ./... -count=1
+exit 0
+catalog 3.276s; cli 3.568s; content 4.487s; validator 3.736s
+
+$ go vet ./...
+exit 0（无输出）
+
+$ gofmt -d internal/content internal/cli cmd/whiteboard
+exit 0（无输出）
+
+$ git diff --check
+exit 0（无输出）
+
+$ go run ./cmd/whiteboard validate --root .
+exit 0
+validation passed
+
+$ go run ./cmd/whiteboard coverage --root . --format json
+exit 0
+baseline_total=75; complete_total=0; missing_case_ids=75
+```
+
+该 I1 已完成 RED/GREEN 与全量验证，当前状态为待下一次 fresh rereview；本报告不提前声称 Approved。

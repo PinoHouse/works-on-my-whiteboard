@@ -51,6 +51,7 @@ func ValidateRepository(root string, repository *catalog.Catalog) Result {
 			"repository root cannot be resolved",
 		)}}
 	}
+	rootReal = filepath.Clean(rootReal)
 
 	if repository != nil {
 		for _, id := range sortedCaseIDs(repository.Cases) {
@@ -59,7 +60,7 @@ func ValidateRepository(root string, repository *catalog.Catalog) Result {
 				continue
 			}
 			relative := canonicalMarkdownRelativePath("cases", manifest.ID)
-			source, readDiagnostics := readCanonicalMarkdown(rootAbsolute, rootReal, "cases", manifest.ID)
+			source, readDiagnostics := readCanonicalMarkdown(rootReal, rootReal, "cases", manifest.ID)
 			diagnostics = append(diagnostics, readDiagnostics...)
 			if len(readDiagnostics) != 0 {
 				continue
@@ -72,7 +73,7 @@ func ValidateRepository(root string, repository *catalog.Catalog) Result {
 				continue
 			}
 			relative := canonicalMarkdownRelativePath("principles", manifest.ID)
-			source, readDiagnostics := readCanonicalMarkdown(rootAbsolute, rootReal, "principles", manifest.ID)
+			source, readDiagnostics := readCanonicalMarkdown(rootReal, rootReal, "principles", manifest.ID)
 			diagnostics = append(diagnostics, readDiagnostics...)
 			if len(readDiagnostics) != 0 {
 				continue
@@ -81,11 +82,11 @@ func ValidateRepository(root string, repository *catalog.Catalog) Result {
 		}
 	}
 
-	documents, discoveryDiagnostics := discoverMarkdownDocuments(rootAbsolute)
+	documents, discoveryDiagnostics := discoverMarkdownDocuments(rootReal)
 	diagnostics = append(diagnostics, discoveryDiagnostics...)
 	cache := make(map[string]*repositoryDocument, len(documents))
 	for _, documentPath := range documents {
-		document, loadDiagnostics := loadRepositoryDocument(rootAbsolute, documentPath)
+		document, loadDiagnostics := loadRepositoryDocument(rootReal, documentPath)
 		diagnostics = append(diagnostics, loadDiagnostics...)
 		if document != nil {
 			cache[documentPath] = document
@@ -96,7 +97,7 @@ func ValidateRepository(root string, repository *catalog.Catalog) Result {
 		if document == nil {
 			continue
 		}
-		diagnostics = append(diagnostics, validateDocumentLinks(rootAbsolute, rootReal, document, cache)...)
+		diagnostics = append(diagnostics, validateDocumentLinks(rootReal, rootReal, document, cache)...)
 	}
 	return Result{Diagnostics: sortContentDiagnostics(diagnostics)}
 }

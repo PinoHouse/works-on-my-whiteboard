@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -167,6 +168,22 @@ func TestValidateRepositoryScansAuthoredMarkdownAndSkipsStateDirectories(t *test
 	}
 	if count != 1 {
 		t.Fatalf("diagnostics = %#v; want exactly one authored Markdown link failure", result.Diagnostics)
+	}
+}
+
+func TestValidateRepositoryResolvesRootSymlinkBeforeWalking(t *testing.T) {
+	realRoot := t.TempDir()
+	writeTestFile(t, filepath.Join(realRoot, "README.md"), "[broken](docs/missing.md)\n")
+	symlinkRoot := filepath.Join(t.TempDir(), "repository")
+	if err := os.Symlink(realRoot, symlinkRoot); err != nil {
+		t.Fatal(err)
+	}
+
+	direct := ValidateRepository(realRoot, emptyCatalog())
+	linked := ValidateRepository(symlinkRoot, emptyCatalog())
+	assertHasDiagnosticCode(t, direct, CodeMissingLinkTarget)
+	if !reflect.DeepEqual(linked.Diagnostics, direct.Diagnostics) {
+		t.Fatalf("symlink-root diagnostics=%#v; want direct-root diagnostics=%#v", linked.Diagnostics, direct.Diagnostics)
 	}
 }
 
