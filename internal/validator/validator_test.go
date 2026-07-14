@@ -435,6 +435,22 @@ func TestValidateCompleteContractRejectsEmptyNestedFields(t *testing.T) {
 			},
 		},
 		{
+			name: "case dimension",
+			mutate: func(c *catalog.Catalog) {
+				manifest := c.Cases["case-a"]
+				manifest.Dimensions = []catalog.DimensionID{" "}
+				c.Cases[manifest.ID] = manifest
+			},
+		},
+		{
+			name: "principle dimension",
+			mutate: func(c *catalog.Catalog) {
+				manifest := c.Principles["principle-a"]
+				manifest.Dimensions = []catalog.DimensionID{" "}
+				c.Principles[manifest.ID] = manifest
+			},
+		},
+		{
 			name: "evidence claim",
 			mutate: func(c *catalog.Catalog) {
 				manifest := c.Cases["case-a"]

@@ -79,6 +79,10 @@ func TestComputeCoverageComparesIDsRatherThanCounts(t *testing.T) {
 	if !reflect.DeepEqual(coverage.UnexpectedCaseIDs, []string{"case-unexpected"}) {
 		t.Fatalf("unexpected cases = %#v, want [case-unexpected]", coverage.UnexpectedCaseIDs)
 	}
+	wantFamilies := []FamilyCoverage{{ID: "addressing-traffic", Required: 1, Complete: 0}}
+	if !reflect.DeepEqual(coverage.Families, wantFamilies) {
+		t.Fatalf("family coverage = %#v, want scope-member intersection %#v", coverage.Families, wantFamilies)
+	}
 	assertDiagnosticCode(t, Validate(c, ModeRelease).Diagnostics, CodeReleaseScopeIncomplete)
 }
 
@@ -250,9 +254,12 @@ func TestReleaseFamilyValidationComparesMemberSetsNotCounts(t *testing.T) {
 	report := Validate(c, ModeRelease)
 	assertNoDiagnosticCode(t, report.Diagnostics, CodeReleaseScopeIncomplete)
 	assertDiagnosticCode(t, report.Diagnostics, CodeReleaseFamilyMismatch)
-	if report.Coverage.Families[0].Required != report.Coverage.Families[0].Complete ||
-		report.Coverage.Families[1].Required != report.Coverage.Families[1].Complete {
-		t.Fatalf("fixture must preserve equal per-family counts: %#v", report.Coverage.Families)
+	wantFamilies := []FamilyCoverage{
+		{ID: "addressing-traffic", Required: 1, Complete: 0},
+		{ID: "distributed-storage", Required: 1, Complete: 0},
+	}
+	if !reflect.DeepEqual(report.Coverage.Families, wantFamilies) {
+		t.Fatalf("family coverage = %#v, want member-set intersections %#v", report.Coverage.Families, wantFamilies)
 	}
 }
 

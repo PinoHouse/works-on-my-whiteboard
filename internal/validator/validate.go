@@ -18,7 +18,7 @@ func Validate(c *catalog.Catalog, mode Mode) Report {
 	diagnostics := make([]Diagnostic, 0)
 	diagnostics = append(diagnostics, validateSchemaContracts(c)...)
 	diagnostics = append(diagnostics, validateReferences(c)...)
-	diagnostics = append(diagnostics, validateDependencyGraph(c, coverage)...)
+	diagnostics = append(diagnostics, validateDependencyGraph(c, coverage, mode)...)
 	diagnostics = append(diagnostics, matrixDiagnostics...)
 
 	if mode != ModeDevelopment && mode != ModeRelease {

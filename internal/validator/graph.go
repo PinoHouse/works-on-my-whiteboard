@@ -9,7 +9,7 @@ import (
 
 type dependencyGraph map[string][]string
 
-func validateDependencyGraph(c *catalog.Catalog, coverage Coverage) []Diagnostic {
+func validateDependencyGraph(c *catalog.Catalog, coverage Coverage, mode Mode) []Diagnostic {
 	if c == nil {
 		return []Diagnostic{}
 	}
@@ -17,9 +17,16 @@ func validateDependencyGraph(c *catalog.Catalog, coverage Coverage) []Diagnostic
 	cases := caseManifestsByID(c)
 	principles := principleManifestsByID(c)
 	labs := labManifestsByID(c)
-	adapters := adapterManifestsByID(c)
 	requiredByCompleteCase := makeStringSet()
-	requiredLabsByCompleteOwner := makeStringSet()
+	incompleteTargets := makeStringSet()
+	appendIncomplete := func(targetKind, targetID, entityID, message string) {
+		target := targetKind + ":" + targetID
+		if incompleteTargets.contains(target) {
+			return
+		}
+		incompleteTargets.add(target)
+		diagnostics = append(diagnostics, errorDiagnostic(CodeDependencyIncomplete, entityID, message))
+	}
 
 	for _, caseID := range sortedCaseManifestIDs(cases) {
 		manifest := cases[caseID]
@@ -31,15 +38,14 @@ func validateDependencyGraph(c *catalog.Catalog, coverage Coverage) []Diagnostic
 			requiredByCompleteCase.add(principleID)
 			principle, exists := principles[principleID]
 			if exists && principle.Status != catalog.LifecycleStatusComplete {
-				diagnostics = append(diagnostics, errorDiagnostic(CodeDependencyIncomplete, manifest.ID, fmt.Sprintf("complete case %q requires complete principle %q", manifest.ID, principleID)))
+				appendIncomplete("principle", principleID, manifest.ID, fmt.Sprintf("complete case %q requires complete principle %q", manifest.ID, principleID))
 			}
 		}
 		for _, labReference := range manifest.Labs {
 			labID := resolveID(c, catalog.EntityKindLab, labReference)
-			requiredLabsByCompleteOwner.add(labID)
 			lab, exists := labs[labID]
 			if exists && (lab.Kind != catalog.LabKindScenario || lab.Status != catalog.LifecycleStatusComplete) {
-				diagnostics = append(diagnostics, errorDiagnostic(CodeDependencyIncomplete, manifest.ID, fmt.Sprintf("complete case %q requires complete scenario lab %q", manifest.ID, labID)))
+				appendIncomplete("lab", labID, manifest.ID, fmt.Sprintf("complete case %q requires complete scenario lab %q", manifest.ID, labID))
 			}
 		}
 	}
@@ -51,10 +57,9 @@ func validateDependencyGraph(c *catalog.Catalog, coverage Coverage) []Diagnostic
 		}
 		for _, labReference := range manifest.Labs {
 			labID := resolveID(c, catalog.EntityKindLab, labReference)
-			requiredLabsByCompleteOwner.add(labID)
 			lab, exists := labs[labID]
 			if exists && (lab.Kind != catalog.LabKindPrimitive || lab.Status != catalog.LifecycleStatusComplete) {
-				diagnostics = append(diagnostics, errorDiagnostic(CodeDependencyIncomplete, manifest.ID, fmt.Sprintf("complete principle %q requires complete primitive lab %q", manifest.ID, labID)))
+				appendIncomplete("lab", labID, manifest.ID, fmt.Sprintf("complete principle %q requires complete primitive lab %q", manifest.ID, labID))
 			}
 		}
 	}
@@ -66,9 +71,6 @@ func validateDependencyGraph(c *catalog.Catalog, coverage Coverage) []Diagnostic
 	for _, principleID := range requiredPrinciples.sorted() {
 		principle, exists := principles[principleID]
 		if !exists {
-			continue
-		}
-		if principle.Status != catalog.LifecycleStatusComplete && !requiredByCompleteCase.contains(principleID) {
 			continue
 		}
 		hasPrimitiveEdge := false
@@ -85,20 +87,23 @@ func validateDependencyGraph(c *catalog.Catalog, coverage Coverage) []Diagnostic
 		}
 	}
 
-	for _, labID := range requiredLabsByCompleteOwner.sorted() {
-		lab, exists := labs[labID]
-		if !exists || lab.Status != catalog.LifecycleStatusComplete {
-			continue
+	if mode == ModeRelease {
+		for _, principleID := range coverage.RequiredPrinciples {
+			principle, exists := principles[principleID]
+			if exists && principle.Status != catalog.LifecycleStatusComplete {
+				appendIncomplete("principle", principleID, principleID, fmt.Sprintf("release requires principle %q to be complete", principleID))
+			}
 		}
-		for _, run := range lab.RequiredRuns {
-			for _, requirement := range run.Adapters {
-				if !requirement.Required {
-					continue
-				}
-				adapter, adapterExists := adapters[requirement.ID]
-				if adapterExists && adapter.Status != catalog.LifecycleStatusComplete {
-					diagnostics = append(diagnostics, errorDiagnostic(CodeDependencyIncomplete, lab.ID, fmt.Sprintf("complete lab %q requires complete adapter %q", lab.ID, requirement.ID)))
-				}
+		for _, labID := range coverage.RequiredScenarioLabs {
+			lab, exists := labs[labID]
+			if exists && lab.Kind == catalog.LabKindScenario && lab.Status != catalog.LifecycleStatusComplete {
+				appendIncomplete("lab", labID, labID, fmt.Sprintf("release requires scenario lab %q to be complete", labID))
+			}
+		}
+		for _, labID := range coverage.RequiredPrimitiveLabs {
+			lab, exists := labs[labID]
+			if exists && lab.Kind == catalog.LabKindPrimitive && lab.Status != catalog.LifecycleStatusComplete {
+				appendIncomplete("lab", labID, labID, fmt.Sprintf("release requires primitive lab %q to be complete", labID))
 			}
 		}
 	}

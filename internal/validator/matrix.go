@@ -31,10 +31,19 @@ func BuildRequiredMatrix(c *catalog.Catalog) ([]MatrixCell, []Diagnostic) {
 	claimOwners := buildClaimOwners(cases, principles)
 	adapters := adapterManifestsByID(c)
 	labs := labManifestsByID(c)
+	coverage := ComputeCoverage(c)
+	requiredLabs := makeStringSet(coverage.RequiredScenarioLabs...)
+	for _, labID := range coverage.RequiredPrimitiveLabs {
+		requiredLabs.add(labID)
+	}
 	seenCells := make(map[[6]string]struct{})
 
 	for _, labID := range sortedLabManifestIDs(labs) {
 		lab := labs[labID]
+		labMatrixEligible := requiredLabs.contains(lab.ID) &&
+			lab.Status == catalog.LifecycleStatusComplete &&
+			(lab.Kind == catalog.LabKindScenario || lab.Kind == catalog.LabKindPrimitive) &&
+			len(missingCompleteLabFields(lab)) == 0
 		bindings, bindingsByID := collectMatrixBindings(lab)
 		for _, bindingID := range sortedStringMapKeys(bindingsByID) {
 			if len(bindingsByID[bindingID]) > 1 {
@@ -49,48 +58,52 @@ func BuildRequiredMatrix(c *catalog.Catalog) ([]MatrixCell, []Diagnostic) {
 			}
 		}
 
-		seenRuns := makeStringSet()
+		runIDCounts := make(map[string]int, len(lab.RequiredRuns))
 		for _, run := range lab.RequiredRuns {
-			if seenRuns.contains(run.ID) {
-				diagnostics = append(diagnostics, errorDiagnostic(CodeDuplicateRequiredRun, lab.ID, fmt.Sprintf("lab %q declares required run ID %q more than once", lab.ID, run.ID)))
+			runIDCounts[run.ID]++
+		}
+		for _, runID := range sortedStringMapKeys(runIDCounts) {
+			if runIDCounts[runID] > 1 {
+				diagnostics = append(diagnostics, errorDiagnostic(CodeDuplicateRequiredRun, lab.ID, fmt.Sprintf("lab %q declares required run ID %q more than once", lab.ID, runID)))
 			}
-			seenRuns.add(run.ID)
-
+		}
+		implementations := makeStringSet(lab.Implementations...)
+		for _, run := range lab.RequiredRuns {
+			runValid := runIDCounts[run.ID] == 1
+			var binding *matrixBinding
 			resolved := bindingsByID[run.Binding]
 			if run.Binding == "" || len(resolved) != 1 {
 				diagnostics = append(diagnostics, errorDiagnostic(CodeInvalidRunBinding, lab.ID, fmt.Sprintf("lab %q required run %q binding %q resolves to %d bindings; want exactly one", lab.ID, run.ID, run.Binding, len(resolved))))
-				continue
-			}
-			binding := resolved[0]
-			binding.used = true
-			if !bindingKindMatchesLab(binding.kind, lab.Kind) {
-				diagnostics = append(diagnostics, errorDiagnostic(CodeOrphanedLab, lab.ID, fmt.Sprintf("lab %q required run %q resolves to the wrong binding kind", lab.ID, run.ID)))
-				continue
+				runValid = false
+			} else {
+				binding = resolved[0]
+				binding.used = true
+				if !bindingKindMatchesLab(binding.kind, lab.Kind) {
+					diagnostics = append(diagnostics, errorDiagnostic(CodeOrphanedLab, lab.ID, fmt.Sprintf("lab %q required run %q resolves to the wrong binding kind", lab.ID, run.ID)))
+					runValid = false
+				}
+				if !binding.claimValid {
+					runValid = false
+				}
+				if run.Workload != binding.workload {
+					diagnostics = append(diagnostics, errorDiagnostic(CodeBindingWorkloadMismatch, lab.ID, fmt.Sprintf("lab %q required run %q workload %q differs from binding %q workload %q", lab.ID, run.ID, run.Workload, binding.id, binding.workload)))
+					runValid = false
+				}
 			}
 
-			if !binding.claimValid {
-				continue
-			}
-			if run.Workload != binding.workload {
-				diagnostics = append(diagnostics, errorDiagnostic(CodeBindingWorkloadMismatch, lab.ID, fmt.Sprintf("lab %q required run %q workload %q differs from binding %q workload %q", lab.ID, run.ID, run.Workload, binding.id, binding.workload)))
-				continue
-			}
-
-			implementations := makeStringSet(lab.Implementations...)
-			invalidRun := false
 			if !implementations.contains(run.Baseline) {
 				diagnostics = append(diagnostics, errorDiagnostic(CodeUnknownImplementation, lab.ID, fmt.Sprintf("lab %q required run %q baseline %q is outside implementations", lab.ID, run.ID, run.Baseline)))
-				invalidRun = true
+				runValid = false
 			}
 			seenSelections := makeStringSet(run.Baseline)
 			for _, variantID := range run.Variants {
 				if !implementations.contains(variantID) {
 					diagnostics = append(diagnostics, errorDiagnostic(CodeUnknownImplementation, lab.ID, fmt.Sprintf("lab %q required run %q variant %q is outside implementations", lab.ID, run.ID, variantID)))
-					invalidRun = true
+					runValid = false
 				}
 				if seenSelections.contains(variantID) {
 					diagnostics = append(diagnostics, errorDiagnostic(CodeInvalidRunBinding, lab.ID, fmt.Sprintf("lab %q required run %q repeats implementation %q as a baseline or variant", lab.ID, run.ID, variantID)))
-					invalidRun = true
+					runValid = false
 				}
 				seenSelections.add(variantID)
 			}
@@ -98,18 +111,26 @@ func BuildRequiredMatrix(c *catalog.Catalog) ([]MatrixCell, []Diagnostic) {
 			for _, requirement := range run.Adapters {
 				if seenAdapters.contains(requirement.ID) {
 					diagnostics = append(diagnostics, errorDiagnostic(CodeInvalidRunBinding, lab.ID, fmt.Sprintf("lab %q required run %q repeats adapter %q", lab.ID, run.ID, requirement.ID)))
-					invalidRun = true
+					runValid = false
 				}
 				seenAdapters.add(requirement.ID)
 				if !requirement.Required {
 					continue
 				}
-				_, exists := adapters[requirement.ID]
+				adapter, exists := adapters[requirement.ID]
 				if !exists {
 					diagnostics = append(diagnostics, errorDiagnostic(CodeMissingRequiredAdapter, lab.ID, fmt.Sprintf("lab %q required run %q needs complete adapter %q", lab.ID, run.ID, requirement.ID)))
+					runValid = false
+				} else if adapter.Status != catalog.LifecycleStatusComplete {
+					if lab.Status == catalog.LifecycleStatusComplete {
+						diagnostics = append(diagnostics, errorDiagnostic(CodeDependencyIncomplete, lab.ID, fmt.Sprintf("complete lab %q required run %q needs complete adapter %q", lab.ID, run.ID, requirement.ID)))
+						runValid = false
+					}
+				} else if len(missingCompleteAdapterFields(adapter)) != 0 {
+					runValid = false
 				}
 			}
-			if invalidRun {
+			if !runValid || !labMatrixEligible {
 				continue
 			}
 

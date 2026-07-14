@@ -54,17 +54,12 @@ func ComputeCoverage(c *catalog.Catalog) Coverage {
 
 	cases := caseManifestsByID(c)
 	completeCases := makeStringSet()
-	completeByFamily := make(map[string]stringSet)
 	for _, id := range sortedCaseManifestIDs(cases) {
 		manifest := cases[id]
 		if manifest.Status != catalog.LifecycleStatusComplete {
 			continue
 		}
 		completeCases.add(manifest.ID)
-		if completeByFamily[manifest.PrimaryFamily] == nil {
-			completeByFamily[manifest.PrimaryFamily] = makeStringSet()
-		}
-		completeByFamily[manifest.PrimaryFamily].add(manifest.ID)
 	}
 
 	coverage.BaselineTotal = len(baselineCases)
@@ -72,10 +67,17 @@ func ComputeCoverage(c *catalog.Catalog) Coverage {
 	coverage.MissingCaseIDs = sortedDifference(baselineCases, completeCases)
 	coverage.UnexpectedCaseIDs = sortedDifference(completeCases, baselineCases)
 	for _, familyID := range baselineFamilies.sorted() {
+		completeMembers := 0
+		for caseID := range requiredByFamily[familyID] {
+			manifest, exists := cases[caseID]
+			if exists && manifest.Status == catalog.LifecycleStatusComplete && manifest.PrimaryFamily == familyID {
+				completeMembers++
+			}
+		}
 		coverage.Families = append(coverage.Families, FamilyCoverage{
 			ID:       familyID,
 			Required: len(requiredByFamily[familyID]),
-			Complete: len(completeByFamily[familyID]),
+			Complete: completeMembers,
 		})
 	}
 

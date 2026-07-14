@@ -238,6 +238,9 @@ func missingCompleteCaseFields(manifest catalog.CaseManifest) []string {
 	appendBlank(&missing, "title", manifest.Title)
 	appendBlank(&missing, "primary_family", manifest.PrimaryFamily)
 	appendEmpty(&missing, "dimensions", len(manifest.Dimensions))
+	for index, dimension := range manifest.Dimensions {
+		appendBlank(&missing, fmt.Sprintf("dimensions[%d]", index), string(dimension))
+	}
 	appendEmpty(&missing, "principles", len(manifest.Principles))
 	appendEmpty(&missing, "claims", len(manifest.Claims))
 	appendEmpty(&missing, "labs", len(manifest.Labs))
@@ -263,6 +266,9 @@ func missingCompletePrincipleFields(manifest catalog.PrincipleManifest) []string
 	missing := make([]string, 0)
 	appendBlank(&missing, "title", manifest.Title)
 	appendEmpty(&missing, "dimensions", len(manifest.Dimensions))
+	for index, dimension := range manifest.Dimensions {
+		appendBlank(&missing, fmt.Sprintf("dimensions[%d]", index), string(dimension))
+	}
 	appendEmpty(&missing, "claims", len(manifest.Claims))
 	appendEmpty(&missing, "labs", len(manifest.Labs))
 	appendEmpty(&missing, "evidence_requirements", len(manifest.EvidenceRequirements))
