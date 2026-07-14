@@ -44,6 +44,60 @@ type coordinatorStub struct {
 	calls    int
 }
 
+type coordinatorFunc func(context.Context, string, uint64) (tokenbucket.Decision, error)
+
+func (f coordinatorFunc) Take(ctx context.Context, tenantID string, amount uint64) (tokenbucket.Decision, error) {
+	return f(ctx, tenantID, amount)
+}
+
+type switchableContext struct {
+	mu   sync.RWMutex
+	done chan struct{}
+	err  error
+	once sync.Once
+}
+
+func newSwitchableContext() *switchableContext {
+	return &switchableContext{done: make(chan struct{})}
+}
+
+func (*switchableContext) Deadline() (time.Time, bool) {
+	return time.Time{}, false
+}
+
+func (c *switchableContext) Done() <-chan struct{} {
+	return c.done
+}
+
+func (c *switchableContext) Err() error {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.err
+}
+
+func (*switchableContext) Value(any) any {
+	return nil
+}
+
+func (c *switchableContext) fail(err error) {
+	c.once.Do(func() {
+		c.mu.Lock()
+		c.err = err
+		c.mu.Unlock()
+		close(c.done)
+	})
+}
+
+type unavailableIsOnlyError struct{}
+
+func (*unavailableIsOnlyError) Error() string {
+	return "unavailable is-only impostor"
+}
+
+func (*unavailableIsOnlyError) Is(target error) bool {
+	return target == ErrCoordinatorUnavailable
+}
+
 type cancelingClock struct {
 	now    time.Time
 	cancel context.CancelFunc
@@ -118,11 +172,8 @@ func TestConstructorsRejectInvalidDependenciesAndConfiguration(t *testing.T) {
 	if _, err := NewCoordinatedLimiter(&coordinatorStub{}, OutagePolicy(99)); err == nil {
 		t.Fatal("NewCoordinatedLimiter(invalid policy) error = nil")
 	}
-	if _, err := NewAvailabilityCoordinator(nil, config); err == nil {
+	if _, err := NewAvailabilityCoordinator(nil); err == nil {
 		t.Fatal("NewAvailabilityCoordinator(nil) error = nil")
-	}
-	if _, err := NewAvailabilityCoordinator(&coordinatorStub{}, tokenbucket.Config{}); !errors.Is(err, tokenbucket.ErrInvalidCapacity) {
-		t.Fatalf("NewAvailabilityCoordinator(invalid config) error = %v", err)
 	}
 }
 
@@ -382,6 +433,85 @@ func TestOutagePolicyOnlyHandlesUnavailableSentinel(t *testing.T) {
 	}
 }
 
+func TestOutagePolicyAcceptsLinearUnavailableWrappingOnly(t *testing.T) {
+	wrapped := fmt.Errorf("outer: %w", fmt.Errorf("inner: %w", ErrCoordinatorUnavailable))
+	limiter, err := NewCoordinatedLimiter(&coordinatorStub{err: wrapped}, PolicyFailOpen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decision, err := limiter.Allow(context.Background(), Request{TenantID: "tenant", NodeID: "node", Amount: 1})
+	want := Decision{Allowed: true, Degraded: true, Reason: "coordinator-unavailable-fail-open"}
+	if err != nil || decision != want {
+		t.Fatalf("Allow() = %#v, %v; want %#v, nil", decision, err, want)
+	}
+}
+
+func TestContextFailureDuringCoordinatorTakeBypassesFailOpen(t *testing.T) {
+	request := Request{TenantID: "tenant", NodeID: "node", Amount: 1}
+	t.Run("canceled", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		coordinator := coordinatorFunc(func(context.Context, string, uint64) (tokenbucket.Decision, error) {
+			cancel()
+			return tokenbucket.Decision{}, ErrCoordinatorUnavailable
+		})
+		limiter, err := NewCoordinatedLimiter(coordinator, PolicyFailOpen)
+		if err != nil {
+			t.Fatal(err)
+		}
+		decision, err := limiter.Allow(ctx, request)
+		if decision != (Decision{}) || !errors.Is(err, context.Canceled) {
+			t.Fatalf("Allow() = %#v, %v; want zero decision and context.Canceled", decision, err)
+		}
+	})
+	t.Run("deadline", func(t *testing.T) {
+		ctx := newSwitchableContext()
+		coordinator := coordinatorFunc(func(context.Context, string, uint64) (tokenbucket.Decision, error) {
+			ctx.fail(context.DeadlineExceeded)
+			return tokenbucket.Decision{}, ErrCoordinatorUnavailable
+		})
+		limiter, err := NewCoordinatedLimiter(coordinator, PolicyFailOpen)
+		if err != nil {
+			t.Fatal(err)
+		}
+		decision, err := limiter.Allow(ctx, request)
+		if decision != (Decision{}) || !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("Allow() = %#v, %v; want zero decision and context.DeadlineExceeded", decision, err)
+		}
+	})
+}
+
+func TestOutagePolicyRejectsCompositeAndIsOnlyUnavailableErrors(t *testing.T) {
+	internal := errors.New("internal root cause")
+	impostor := &unavailableIsOnlyError{}
+	tests := []struct {
+		name  string
+		err   error
+		roots []error
+	}{
+		{name: "joined-internal", err: errors.Join(ErrCoordinatorUnavailable, internal), roots: []error{ErrCoordinatorUnavailable, internal}},
+		{name: "multiple-wrap", err: fmt.Errorf("unavailable and internal: %w / %w", ErrCoordinatorUnavailable, internal), roots: []error{ErrCoordinatorUnavailable, internal}},
+		{name: "joined-canceled", err: errors.Join(ErrCoordinatorUnavailable, context.Canceled), roots: []error{ErrCoordinatorUnavailable, context.Canceled}},
+		{name: "is-only", err: impostor, roots: []error{impostor}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			limiter, err := NewCoordinatedLimiter(&coordinatorStub{err: test.err}, PolicyFailOpen)
+			if err != nil {
+				t.Fatal(err)
+			}
+			decision, err := limiter.Allow(context.Background(), Request{TenantID: "tenant", NodeID: "node", Amount: 1})
+			if decision != (Decision{}) || err == nil {
+				t.Fatalf("Allow() = %#v, %v; want zero decision and propagated error", decision, err)
+			}
+			for _, root := range test.roots {
+				if !errors.Is(err, root) {
+					t.Errorf("error %v does not preserve root %v", err, root)
+				}
+			}
+		})
+	}
+}
+
 func TestActualCoordinatorRollbackBypassesFailOpenAndPreservesBudget(t *testing.T) {
 	start := time.Unix(1, 0).UTC()
 	clock := &countingClock{now: start}
@@ -416,7 +546,7 @@ func TestUnavailableCoordinatorDoesNotMutateAndRestoreKeepsState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	availability, err := NewAvailabilityCoordinator(shared, tokenbucket.Config{Capacity: 2, RefillEvery: time.Hour})
+	availability, err := NewAvailabilityCoordinator(shared)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -452,8 +582,12 @@ func TestUnavailableCoordinatorDoesNotMutateAndRestoreKeepsState(t *testing.T) {
 }
 
 func TestAvailabilityCoordinatorValidatesContextBeforeAvailability(t *testing.T) {
-	stub := &coordinatorStub{}
-	availability, err := NewAvailabilityCoordinator(stub, tokenbucket.Config{Capacity: 2, RefillEvery: time.Hour})
+	clock := &countingClock{now: time.Unix(0, 0).UTC()}
+	shared, err := NewSharedCoordinator(clock, tokenbucket.Config{Capacity: 2, RefillEvery: time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	availability, err := NewAvailabilityCoordinator(shared)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -468,14 +602,18 @@ func TestAvailabilityCoordinatorValidatesContextBeforeAvailability(t *testing.T)
 	if !errors.Is(err, context.Canceled) || errors.Is(err, ErrCoordinatorUnavailable) || decision != (tokenbucket.Decision{}) {
 		t.Fatalf("Take(canceled) = %#v, %v", decision, err)
 	}
-	if stub.callCount() != 0 {
-		t.Fatalf("underlying calls = %d", stub.callCount())
+	if clock.callCount() != 0 || len(shared.buckets) != 0 {
+		t.Fatalf("underlying clock calls/buckets = %d/%d", clock.callCount(), len(shared.buckets))
 	}
 }
 
 func TestUnavailableCoordinatorRejectsOversizedAmountWithoutPolicyOrDelegation(t *testing.T) {
-	stub := &coordinatorStub{}
-	availability, err := NewAvailabilityCoordinator(stub, tokenbucket.Config{Capacity: 2, RefillEvery: time.Hour})
+	clock := &countingClock{now: time.Unix(0, 0).UTC()}
+	shared, err := NewSharedCoordinator(clock, tokenbucket.Config{Capacity: 2, RefillEvery: time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	availability, err := NewAvailabilityCoordinator(shared)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -488,8 +626,35 @@ func TestUnavailableCoordinatorRejectsOversizedAmountWithoutPolicyOrDelegation(t
 	if !errors.Is(err, tokenbucket.ErrAmountExceedsCapacity) || decision != (Decision{}) {
 		t.Fatalf("Allow(oversized during outage) = %#v, %v", decision, err)
 	}
-	if stub.callCount() != 0 {
-		t.Fatalf("underlying calls = %d, want 0", stub.callCount())
+	if clock.callCount() != 0 || len(shared.buckets) != 0 {
+		t.Fatalf("underlying clock calls/buckets = %d/%d, want 0/0", clock.callCount(), len(shared.buckets))
+	}
+}
+
+func TestRequestValidityIsIdenticalAcrossAvailabilityStates(t *testing.T) {
+	clock := &countingClock{now: time.Unix(0, 0).UTC()}
+	shared, err := NewSharedCoordinator(clock, tokenbucket.Config{Capacity: 1, RefillEvery: time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	availability, err := NewAvailabilityCoordinator(shared)
+	if err != nil {
+		t.Fatal(err)
+	}
+	limiter, err := NewCoordinatedLimiter(availability, PolicyFailOpen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := Request{TenantID: "tenant", NodeID: "node", Amount: 2}
+	for _, available := range []bool{false, true} {
+		availability.SetAvailable(available)
+		decision, allowErr := limiter.Allow(context.Background(), request)
+		if decision != (Decision{}) || !errors.Is(allowErr, tokenbucket.ErrAmountExceedsCapacity) {
+			t.Errorf("available=%t: Allow() = %#v, %v", available, decision, allowErr)
+		}
+	}
+	if clock.callCount() != 0 || len(shared.buckets) != 0 {
+		t.Fatalf("underlying clock calls/buckets = %d/%d, want 0/0", clock.callCount(), len(shared.buckets))
 	}
 }
 
@@ -558,7 +723,7 @@ func TestAvailabilityStateIsRaceSafeDuringDecisions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	availability, err := NewAvailabilityCoordinator(shared, config)
+	availability, err := NewAvailabilityCoordinator(shared)
 	if err != nil {
 		t.Fatal(err)
 	}

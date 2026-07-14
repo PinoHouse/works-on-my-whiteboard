@@ -101,20 +101,20 @@ func (c *SharedCoordinator) Take(ctx context.Context, tenantID string, amount ui
 }
 
 type AvailabilityCoordinator struct {
-	delegate  Coordinator
+	delegate  *SharedCoordinator
 	config    tokenbucket.Config
 	mu        sync.RWMutex
 	available bool
 }
 
-func NewAvailabilityCoordinator(delegate Coordinator, config tokenbucket.Config) (*AvailabilityCoordinator, error) {
+func NewAvailabilityCoordinator(delegate *SharedCoordinator) (*AvailabilityCoordinator, error) {
 	if delegate == nil {
 		return nil, errors.New("availability coordinator delegate is nil")
 	}
-	if err := validateTokenBucketConfig(config); err != nil {
-		return nil, fmt.Errorf("availability coordinator config: %w", err)
+	if delegate.clock == nil || delegate.buckets == nil {
+		return nil, errors.New("availability coordinator delegate is not initialized")
 	}
-	return &AvailabilityCoordinator{delegate: delegate, config: config, available: true}, nil
+	return &AvailabilityCoordinator{delegate: delegate, config: delegate.config, available: true}, nil
 }
 
 func (c *AvailabilityCoordinator) SetAvailable(available bool) {
@@ -173,6 +173,9 @@ func (l *coordinatedLimiter) Allow(ctx context.Context, request Request) (Decisi
 		return Decision{}, fmt.Errorf("coordinated limiter context unavailable: %w", err)
 	}
 	decision, err := l.coordinator.Take(ctx, request.TenantID, request.Amount)
+	if contextErr := ctx.Err(); contextErr != nil {
+		return Decision{}, fmt.Errorf("coordinated limiter context unavailable after coordinator take: %w", contextErr)
+	}
 	if err == nil {
 		return Decision{
 			Allowed:    decision.Allowed,
@@ -180,7 +183,10 @@ func (l *coordinatedLimiter) Allow(ctx context.Context, request Request) (Decisi
 			RetryAfter: decision.RetryAfter,
 		}, nil
 	}
-	if !errors.Is(err, ErrCoordinatorUnavailable) {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return Decision{}, fmt.Errorf("coordinator take context failure: %w", err)
+	}
+	if !isExclusiveCoordinatorUnavailable(err) {
 		return Decision{}, fmt.Errorf("coordinator take failed: %w", err)
 	}
 	if l.policy == PolicyFailOpen {
@@ -194,6 +200,25 @@ func (l *coordinatedLimiter) Allow(ctx context.Context, request Request) (Decisi
 		Degraded: true,
 		Reason:   "coordinator-unavailable-fail-closed",
 	}, nil
+}
+
+func isExclusiveCoordinatorUnavailable(err error) bool {
+	const maximumLinearDepth = 64
+	current := err
+	for depth := 0; depth < maximumLinearDepth && current != nil; depth++ {
+		if current == ErrCoordinatorUnavailable {
+			return true
+		}
+		if _, composite := current.(interface{ Unwrap() []error }); composite {
+			return false
+		}
+		wrapper, wrapped := current.(interface{ Unwrap() error })
+		if !wrapped {
+			return false
+		}
+		current = wrapper.Unwrap()
+	}
+	return false
 }
 
 type tenantNodeKey struct {

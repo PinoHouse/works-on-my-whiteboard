@@ -249,7 +249,7 @@ func (s *scenarioState) initialize(runtime *harness.Runtime) error {
 		if err != nil {
 			return fmt.Errorf("create shared coordinator: %w", err)
 		}
-		availability, err := NewAvailabilityCoordinator(coordinator, s.config)
+		availability, err := NewAvailabilityCoordinator(coordinator)
 		if err != nil {
 			return fmt.Errorf("create availability coordinator: %w", err)
 		}
