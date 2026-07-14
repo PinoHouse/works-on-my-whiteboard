@@ -123,6 +123,7 @@ func cloneRunSpec(source RunSpec) RunSpec {
 }
 
 func validateRunSpec(spec RunSpec) error {
+	start := spec.Start.UTC()
 	identities := []struct {
 		name     string
 		value    string
@@ -160,6 +161,9 @@ func validateRunSpec(spec RunSpec) error {
 		if event.At > spec.Deadline {
 			return fmt.Errorf("event %d offset %s exceeds deadline %s", index, event.At, spec.Deadline)
 		}
+		if !logicalEventTimeRepresentable(start, event.At) {
+			return fmt.Errorf("event %d offset %s overflows logical time", index, event.At)
+		}
 		if event.Phase != PhaseFault && event.Phase != PhaseRequest && event.Phase != PhaseObserve {
 			return fmt.Errorf("event %d has invalid phase %d", index, event.Phase)
 		}
@@ -190,6 +194,14 @@ func validateRunSpec(spec RunSpec) error {
 		seenAssertions[assertion.ID] = struct{}{}
 	}
 	return nil
+}
+
+func logicalEventTimeRepresentable(start time.Time, offset time.Duration) bool {
+	target := start.Add(offset)
+	if offset == 0 {
+		return target.Equal(start)
+	}
+	return target.After(start) && target.Add(-offset).Equal(start)
 }
 
 func newFailedResult(start time.Time) RunResult {

@@ -205,6 +205,66 @@ func TestRunnerDeadlineIsInclusiveAndLogicalOnly(t *testing.T) {
 	})
 }
 
+func TestRunnerPreflightRejectsOverflowingLogicalScheduleAtomically(t *testing.T) {
+	start := time.Unix(math.MaxInt64-62_135_596_800, 999_999_999).UTC()
+	callbacks := 0
+	action := func(context.Context, *Runtime) error {
+		callbacks++
+		return nil
+	}
+	spec := validRunSpec()
+	spec.Start = start
+	spec.Deadline = time.Nanosecond
+	spec.Events = []Event{
+		{At: 0, Phase: PhaseRequest, Sequence: 0, Name: "at-start", Apply: action},
+		{At: time.Nanosecond, Phase: PhaseRequest, Sequence: 1, Name: "overflow", Apply: action},
+	}
+	spec.Assertions = nil
+
+	result, err := NewRunner().Run(context.Background(), spec)
+	assertFailedInitialized(t, result, err, start)
+	if callbacks != 0 {
+		t.Fatalf("callback count = %d, want atomic preflight rejection with zero callbacks", callbacks)
+	}
+}
+
+func TestRunnerAcceptsRepresentableLogicalSchedulesAtOrdinaryZeroAndNearMinStarts(t *testing.T) {
+	tests := []struct {
+		name  string
+		start time.Time
+	}{
+		{name: "ordinary", start: testStart},
+		{name: "zero", start: time.Time{}},
+		{name: "near minimum Unix", start: time.Unix(math.MinInt64, 0).UTC()},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			callbacks := 0
+			spec := validRunSpec()
+			spec.Start = test.start
+			spec.Deadline = time.Nanosecond
+			spec.Events[0].At = time.Nanosecond
+			spec.Events[0].Apply = func(context.Context, *Runtime) error {
+				callbacks++
+				return nil
+			}
+			spec.Assertions = nil
+
+			result, err := NewRunner().Run(context.Background(), spec)
+			if err != nil {
+				t.Fatalf("Run returned error: %v", err)
+			}
+			if callbacks != 1 {
+				t.Fatalf("callback count = %d, want 1", callbacks)
+			}
+			if got, want := result.FinishedAt, test.start.UTC().Add(time.Nanosecond); got != want {
+				t.Fatalf("FinishedAt = %#v, want %#v", got, want)
+			}
+		})
+	}
+}
+
 func TestRunnerPreflightRejectsInvalidSpecsAtomically(t *testing.T) {
 	tests := []struct {
 		name   string
