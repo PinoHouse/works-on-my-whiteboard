@@ -262,6 +262,90 @@ func TestStoreListClassifiesEveryOperationalDirectoryFailureAsIO(t *testing.T) {
 	}
 }
 
+func TestStoreListClassifiesEveryOperationalReopenFailureAsIO(t *testing.T) {
+	tests := []struct {
+		name   string
+		inject func(*testing.T, *Store, error)
+	}{
+		{name: "open filesystem root", inject: func(t *testing.T, store *Store, injected error) {
+			store.anchorOps.openRoot = func(string) (*os.Root, error) {
+				return nil, injected
+			}
+		}},
+		{name: "lstat component", inject: func(t *testing.T, store *Store, injected error) {
+			store.anchorOps.lstat = func(*os.Root, string) (fs.FileInfo, error) {
+				return nil, injected
+			}
+		}},
+		{name: "open child root", inject: func(t *testing.T, store *Store, injected error) {
+			store.anchorOps.openChild = func(*os.Root, string) (*os.Root, error) {
+				return nil, injected
+			}
+		}},
+		{name: "open child inspection", inject: func(t *testing.T, store *Store, injected error) {
+			store.anchorOps.openDirectory = func(*os.Root) (*os.File, error) {
+				return nil, injected
+			}
+		}},
+		{name: "stat child inspection", inject: func(t *testing.T, store *Store, injected error) {
+			store.anchorOps.statFile = func(*os.File) (fs.FileInfo, error) {
+				return nil, injected
+			}
+		}},
+		{name: "close child inspection", inject: func(t *testing.T, store *Store, injected error) {
+			original := store.anchorOps.closeFile
+			store.anchorOps.closeFile = func(file *os.File) error {
+				return errors.Join(original(file), injected)
+			}
+		}},
+		{name: "close root anchor", inject: func(t *testing.T, store *Store, injected error) {
+			original := store.anchorOps.closeRoot
+			store.anchorOps.closeRoot = func(root *os.Root) error {
+				return errors.Join(original(root), injected)
+			}
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			store := newTestStore(t)
+			injected := fmt.Errorf("injected %s failure", test.name)
+			test.inject(t, store, injected)
+			_, err := store.List(context.Background())
+			if !errors.Is(err, ErrEvidenceIO) || errors.Is(err, ErrEvidenceUnsafePath) || errors.Is(err, ErrEvidenceCorrupt) || !errors.Is(err, injected) {
+				t.Fatalf("List error = %v, want only ErrEvidenceIO wrapping %v", err, injected)
+			}
+		})
+	}
+}
+
+func TestStoreListPreservesPrimaryReopenAndCleanupCloseFailures(t *testing.T) {
+	store := newTestStore(t)
+	primary := errors.New("injected open child failure")
+	closeFailure := errors.New("injected cleanup close failure")
+	store.anchorOps.openChild = func(*os.Root, string) (*os.Root, error) {
+		return nil, primary
+	}
+	originalClose := store.anchorOps.closeRoot
+	store.anchorOps.closeRoot = func(root *os.Root) error {
+		return errors.Join(originalClose(root), closeFailure)
+	}
+	_, err := store.List(context.Background())
+	if !errors.Is(err, ErrEvidenceIO) || errors.Is(err, ErrEvidenceUnsafePath) || errors.Is(err, ErrEvidenceCorrupt) || !errors.Is(err, primary) || !errors.Is(err, closeFailure) {
+		t.Fatalf("List error lost reopen/cleanup cause or taxonomy: %v", err)
+	}
+}
+
+func TestStoreListKeepsMissingFrozenPathAsUnsafe(t *testing.T) {
+	store := newTestStore(t)
+	store.anchorOps.lstat = func(*os.Root, string) (fs.FileInfo, error) {
+		return nil, fs.ErrNotExist
+	}
+	_, err := store.List(context.Background())
+	if !errors.Is(err, ErrEvidenceUnsafePath) || errors.Is(err, ErrEvidenceIO) || errors.Is(err, ErrEvidenceCorrupt) {
+		t.Fatalf("List error = %v, want only ErrEvidenceUnsafePath", err)
+	}
+}
+
 func TestStoreGetClassifiesSnapshotMutationAsCorruptNotIO(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -304,6 +388,77 @@ func TestStoreGetClassifiesSnapshotMutationAsCorruptNotIO(t *testing.T) {
 			_, err := store.Get(context.Background(), record.ID)
 			if !errors.Is(err, ErrEvidenceCorrupt) || errors.Is(err, ErrEvidenceIO) || errors.Is(err, ErrEvidenceNotFound) {
 				t.Fatalf("Get error = %v, want only ErrEvidenceCorrupt", err)
+			}
+		})
+	}
+}
+
+func TestStoreGetPreservesOpenFailureCauseAcrossSemanticPathMutation(t *testing.T) {
+	tests := []struct {
+		name      string
+		want      error
+		forbidden error
+		mutate    func(*testing.T, string)
+	}{
+		{
+			name:      "disappearance",
+			want:      ErrEvidenceCorrupt,
+			forbidden: ErrEvidenceUnsafePath,
+			mutate: func(t *testing.T, target string) {
+				if err := os.Remove(target); err != nil {
+					t.Fatalf("remove record during open: %v", err)
+				}
+			},
+		},
+		{
+			name:      "symlink replacement",
+			want:      ErrEvidenceUnsafePath,
+			forbidden: ErrEvidenceCorrupt,
+			mutate: func(t *testing.T, target string) {
+				if err := os.Remove(target); err != nil {
+					t.Fatalf("remove record before symlink: %v", err)
+				}
+				outside := filepath.Join(filepath.Dir(filepath.Dir(target)), "open-race-outside")
+				if err := os.WriteFile(outside, []byte("outside"), 0o644); err != nil {
+					t.Fatalf("write symlink target: %v", err)
+				}
+				if err := os.Symlink(outside, target); err != nil {
+					t.Skipf("symlink unavailable: %v", err)
+				}
+			},
+		},
+		{
+			name:      "identity replacement",
+			want:      ErrEvidenceCorrupt,
+			forbidden: ErrEvidenceUnsafePath,
+			mutate: func(t *testing.T, target string) {
+				replacement := target + ".replacement"
+				if err := os.WriteFile(replacement, []byte("replacement"), 0o644); err != nil {
+					t.Fatalf("write identity replacement: %v", err)
+				}
+				if err := os.Rename(replacement, target); err != nil {
+					t.Fatalf("install identity replacement: %v", err)
+				}
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			store := newTestStore(t)
+			record := sealedRecordWithEntropy(t, 1)
+			if err := store.Put(context.Background(), record); err != nil {
+				t.Fatalf("Put: %v", err)
+			}
+			target := filepath.Join(store.runs, record.ID+".json")
+			openFailure := errors.New("injected open failure")
+			store.readOps.openFile = func(*os.Root, string) (*os.File, error) {
+				test.mutate(t, target)
+				return nil, openFailure
+			}
+
+			_, err := store.Get(context.Background(), record.ID)
+			if !errors.Is(err, test.want) || errors.Is(err, test.forbidden) || errors.Is(err, ErrEvidenceIO) || !errors.Is(err, openFailure) {
+				t.Fatalf("Get error = %v, want %v wrapping open failure, excluding %v/ErrEvidenceIO", err, test.want, test.forbidden)
 			}
 		})
 	}

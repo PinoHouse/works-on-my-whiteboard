@@ -90,6 +90,42 @@ func TestValidateIDsUseTheExactFrozenGrammar(t *testing.T) {
 	}
 }
 
+func TestValidateCatalogAndMetricIDsUseTheFrozenGrammar(t *testing.T) {
+	tests := []struct {
+		name      string
+		validate  func(string) error
+		canonical []string
+		invalid   []string
+	}{
+		{
+			name:      "stable ID",
+			validate:  ValidateStableID,
+			canonical: []string{"a", "token-bucket", "token-bucket2"},
+			invalid:   []string{"", "2token", "Token", "token_bucket", "token.bucket", "token/bucket", " token"},
+		},
+		{
+			name:      "metric ID",
+			validate:  ValidateMetricID,
+			canonical: []string{"x", "requests.total", "latency_p99", "cache-hit2"},
+			invalid:   []string{"", "2xx", "Requests.total", "requests..total", "requests-", "requests/total", " requests"},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			for _, value := range test.canonical {
+				if err := test.validate(value); err != nil {
+					t.Errorf("canonical %q rejected: %v", value, err)
+				}
+			}
+			for _, value := range test.invalid {
+				if err := test.validate(value); !errors.Is(err, ErrInvalidRecord) {
+					t.Errorf("invalid %q error = %v, want ErrInvalidRecord", value, err)
+				}
+			}
+		})
+	}
+}
+
 func TestSealDeepCopiesNormalizesAndComputesSelfDigest(t *testing.T) {
 	source := validRecord()
 	source.Workload.Parameters["capacity"] = 4

@@ -92,6 +92,93 @@ func TestWriteNoReplaceRejectsUnsafePathsBeforeCreatingTemp(t *testing.T) {
 	assertNoTemps(t, realParent)
 }
 
+func TestWriteNoReplacePreservesPathInspectionCauses(t *testing.T) {
+	t.Run("parent chain lstat", func(t *testing.T) {
+		directory := safeTempDir(t)
+		target := filepath.Join(directory, "target")
+		injected := errors.New("injected parent chain lstat failure")
+		ops := defaultOperations()
+		ops.lstat = func(string) (fs.FileInfo, error) {
+			return nil, injected
+		}
+		result, err := writeNoReplace(context.Background(), target, []byte("payload"), ops)
+		var writeErr *Error
+		if !errors.As(err, &writeErr) || writeErr.Stage != StageValidatePath || result.Installed || !errors.Is(err, ErrUnsafePath) || !errors.Is(err, injected) {
+			t.Fatalf("result=%+v error=%v, want validate-path unsafe preserving lstat cause", result, err)
+		}
+	})
+
+	t.Run("destination lstat", func(t *testing.T) {
+		directory := safeTempDir(t)
+		target := filepath.Join(directory, "target")
+		injected := errors.New("injected destination lstat failure")
+		ops := defaultOperations()
+		originalOpen := ops.openParent
+		ops.openParent = func(path string, info fs.FileInfo) (anchoredDirectory, error) {
+			parent, err := originalOpen(path, info)
+			if err != nil {
+				return nil, err
+			}
+			return &lstatFailureDirectory{anchoredDirectory: parent, injected: injected}, nil
+		}
+		result, err := writeNoReplace(context.Background(), target, []byte("payload"), ops)
+		var writeErr *Error
+		if !errors.As(err, &writeErr) || writeErr.Stage != StageValidatePath || result.Installed || !errors.Is(err, ErrUnsafePath) || !errors.Is(err, injected) {
+			t.Fatalf("result=%+v error=%v, want validate-path unsafe preserving destination cause", result, err)
+		}
+	})
+}
+
+func TestOSRootDirectorySyncPreservesEveryOperationalCause(t *testing.T) {
+	t.Run("open", func(t *testing.T) {
+		injected := errors.New("injected directory open failure")
+		directory := &osRootDirectory{
+			openSyncFile: func() (directorySyncFile, error) {
+				return nil, injected
+			},
+		}
+		if err := directory.Sync(); !errors.Is(err, injected) {
+			t.Fatalf("Sync error = %v, want open cause", err)
+		}
+	})
+
+	t.Run("sync and close", func(t *testing.T) {
+		syncFailure := errors.New("injected directory sync failure")
+		closeFailure := errors.New("injected directory close failure")
+		directory := &osRootDirectory{
+			openSyncFile: func() (directorySyncFile, error) {
+				return &syncCloseFailureFile{syncFailure: syncFailure, closeFailure: closeFailure}, nil
+			},
+		}
+		err := directory.Sync()
+		if !errors.Is(err, syncFailure) || !errors.Is(err, closeFailure) {
+			t.Fatalf("Sync error lost a cause: %v", err)
+		}
+	})
+}
+
+type syncCloseFailureFile struct {
+	syncFailure  error
+	closeFailure error
+}
+
+func (file *syncCloseFailureFile) Sync() error {
+	return file.syncFailure
+}
+
+func (file *syncCloseFailureFile) Close() error {
+	return file.closeFailure
+}
+
+type lstatFailureDirectory struct {
+	anchoredDirectory
+	injected error
+}
+
+func (directory *lstatFailureDirectory) Lstat(string) (fs.FileInfo, error) {
+	return nil, directory.injected
+}
+
 func TestWriteNoReplaceIndependentWritersHaveExactlyOneWinner(t *testing.T) {
 	directory := safeTempDir(t)
 	target := filepath.Join(directory, "winner")
@@ -174,6 +261,91 @@ func TestWriteNoReplaceReportsEveryDurabilityStage(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestWriteNoReplaceReportsParentCloseFailureAfterSuccess(t *testing.T) {
+	directory := safeTempDir(t)
+	target := filepath.Join(directory, "target")
+	closeFailure := errors.New("injected parent close failure")
+	var wrapped *closeFailureDirectory
+	ops := defaultOperations()
+	originalOpen := ops.openParent
+	ops.openParent = func(path string, info fs.FileInfo) (anchoredDirectory, error) {
+		parent, err := originalOpen(path, info)
+		if err != nil {
+			return nil, err
+		}
+		wrapped = &closeFailureDirectory{anchoredDirectory: parent, injected: closeFailure}
+		return wrapped, nil
+	}
+
+	result, err := writeNoReplace(context.Background(), target, []byte("payload"), ops)
+	var writeErr *Error
+	if !errors.As(err, &writeErr) || writeErr.Stage != StageCloseDirectory || !writeErr.Installed || !result.Installed || !errors.Is(err, closeFailure) {
+		t.Fatalf("result=%+v error=%v, want installed close-directory failure", result, err)
+	}
+	if wrapped == nil || wrapped.closeCalls != 1 {
+		t.Fatalf("parent close calls=%d, want exactly one", wrapped.closeCalls)
+	}
+	if data, readErr := os.ReadFile(target); readErr != nil || string(data) != "payload" {
+		t.Fatalf("installed target = %q, %v", data, readErr)
+	}
+	assertNoTemps(t, directory)
+}
+
+func TestWriteNoReplacePreservesPrimaryFailureWhenParentCloseAlsoFails(t *testing.T) {
+	tests := []struct {
+		name          string
+		stage         Stage
+		wantInstalled bool
+	}{
+		{name: "before install", stage: StageWrite},
+		{name: "after install", stage: StageSyncInstall, wantInstalled: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			directory := safeTempDir(t)
+			target := filepath.Join(directory, "target")
+			primary := errors.New("injected primary failure")
+			closeFailure := errors.New("injected parent close failure")
+			fault := newFaultOperations(test.stage, primary)
+			ops := fault.operations()
+			originalOpen := ops.openParent
+			var wrapped *closeFailureDirectory
+			ops.openParent = func(path string, info fs.FileInfo) (anchoredDirectory, error) {
+				parent, err := originalOpen(path, info)
+				if err != nil {
+					return nil, err
+				}
+				wrapped = &closeFailureDirectory{anchoredDirectory: parent, injected: closeFailure}
+				return wrapped, nil
+			}
+
+			result, err := writeNoReplace(context.Background(), target, []byte("payload"), ops)
+			var writeErr *Error
+			if !errors.As(err, &writeErr) || writeErr.Stage != test.stage || writeErr.Installed != test.wantInstalled || result.Installed != test.wantInstalled {
+				t.Fatalf("result=%+v error=%v, want original stage %s installed=%t", result, err, test.stage, test.wantInstalled)
+			}
+			if !errors.Is(err, primary) || !errors.Is(err, closeFailure) {
+				t.Fatalf("combined failure lost cause: %v", err)
+			}
+			if wrapped == nil || wrapped.closeCalls != 1 {
+				t.Fatalf("parent close calls=%d, want exactly one", wrapped.closeCalls)
+			}
+		})
+	}
+}
+
+type closeFailureDirectory struct {
+	anchoredDirectory
+	injected   error
+	closeCalls int
+}
+
+func (directory *closeFailureDirectory) Close() error {
+	directory.closeCalls++
+	realCloseErr := directory.anchoredDirectory.Close()
+	return errors.Join(realCloseErr, directory.injected)
 }
 
 func TestWriteNoReplaceReportsCleanupFailureWithoutLosingOriginalCause(t *testing.T) {
@@ -313,6 +485,177 @@ func TestWriteNoReplaceCancellationPreservesInstalledClassification(t *testing.T
 	assertNoTemps(t, directory)
 }
 
+func TestWriteNoReplaceRejectsTemporaryNameReplacementDuringLink(t *testing.T) {
+	directory := safeTempDir(t)
+	target := filepath.Join(directory, "target")
+	ops := defaultOperations()
+	originalOpen := ops.openParent
+	ops.openParent = func(path string, info fs.FileInfo) (anchoredDirectory, error) {
+		parent, err := originalOpen(path, info)
+		if err != nil {
+			return nil, err
+		}
+		return &replaceTempBeforeLinkDirectory{anchoredDirectory: parent, path: path}, nil
+	}
+
+	result, err := writeNoReplace(context.Background(), target, []byte("trusted payload"), ops)
+	var writeErr *Error
+	if !errors.As(err, &writeErr) || !errors.Is(err, ErrUnsafePath) || writeErr.Installed || result.Installed {
+		t.Fatalf("result=%+v error=%v, want pre-install fail-closed ErrUnsafePath", result, err)
+	}
+	if _, statErr := os.Lstat(target); !errors.Is(statErr, fs.ErrNotExist) {
+		t.Fatalf("temporary-name replacement created target: %v", statErr)
+	}
+	assertNoTemps(t, directory)
+}
+
+type replaceTempBeforeLinkDirectory struct {
+	anchoredDirectory
+	path string
+}
+
+func (directory *replaceTempBeforeLinkDirectory) Install(oldName, newName string, expected fs.FileInfo) (bool, error) {
+	temporaryPath := filepath.Join(directory.path, oldName)
+	if err := os.Remove(temporaryPath); err != nil {
+		return false, err
+	}
+	if err := os.WriteFile(temporaryPath, []byte("attacker payload"), 0o644); err != nil {
+		return false, err
+	}
+	return directory.anchoredDirectory.Install(oldName, newName, expected)
+}
+
+func TestWriteNoReplaceReconcilesLinkThatSucceededBeforeReturningError(t *testing.T) {
+	directory := safeTempDir(t)
+	target := filepath.Join(directory, "target")
+	injected := errors.New("injected ambiguous link failure")
+	var wrapped *linkThenErrorDirectory
+	ops := defaultOperations()
+	originalOpen := ops.openParent
+	ops.openParent = func(path string, info fs.FileInfo) (anchoredDirectory, error) {
+		parent, err := originalOpen(path, info)
+		if err != nil {
+			return nil, err
+		}
+		wrapped = &linkThenErrorDirectory{anchoredDirectory: parent, injected: injected}
+		return wrapped, nil
+	}
+
+	result, err := writeNoReplace(context.Background(), target, []byte("payload"), ops)
+	var writeErr *Error
+	if !errors.As(err, &writeErr) || writeErr.Stage != StageInstall || !errors.Is(err, injected) || !writeErr.Installed || !result.Installed {
+		t.Fatalf("result=%+v error=%v, want installed StageInstall preserving ambiguous link cause", result, err)
+	}
+	if wrapped == nil || wrapped.syncCalls != 2 {
+		t.Fatalf("directory sync calls=%d, want both durability syncs", wrapped.syncCalls)
+	}
+	data, readErr := os.ReadFile(target)
+	if readErr != nil || string(data) != "payload" {
+		t.Fatalf("installed target = %q, %v", data, readErr)
+	}
+	assertNoTemps(t, directory)
+}
+
+func TestOSRootDirectoryInstallReconcilesLinkOutcomeByIdentity(t *testing.T) {
+	tests := []struct {
+		name      string
+		link      func(*osRootDirectory, string, string, error) error
+		wantCause error
+		wantBytes string
+	}{
+		{
+			name: "link succeeded before error",
+			link: func(directory *osRootDirectory, oldName, newName string, injected error) error {
+				if err := directory.root.Link(oldName, newName); err != nil {
+					return err
+				}
+				return injected
+			},
+			wantBytes: "payload",
+		},
+		{
+			name: "target replaced after link",
+			link: func(directory *osRootDirectory, oldName, newName string, _ error) error {
+				if err := directory.root.Link(oldName, newName); err != nil {
+					return err
+				}
+				if err := directory.root.Remove(newName); err != nil {
+					return err
+				}
+				file, err := directory.root.OpenFile(newName, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+				if err != nil {
+					return err
+				}
+				if _, err := file.Write([]byte("attacker")); err != nil {
+					_ = file.Close()
+					return err
+				}
+				return file.Close()
+			},
+			wantCause: ErrUnsafePath,
+			wantBytes: "attacker",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			path := safeTempDir(t)
+			temporaryName := ".target.tmp-test"
+			targetName := "target"
+			temporaryPath := filepath.Join(path, temporaryName)
+			writeFixtureFile(t, temporaryPath, []byte("payload"))
+			expected, err := os.Lstat(temporaryPath)
+			if err != nil {
+				t.Fatalf("lstat temporary: %v", err)
+			}
+			root, identity, err := openDirectoryChain(path)
+			if err != nil {
+				t.Fatalf("open directory chain: %v", err)
+			}
+			directory := &osRootDirectory{root: root, path: path, identity: identity}
+			t.Cleanup(func() { _ = directory.Close() })
+			injected := errors.New("injected ambiguous link error")
+			directory.linkNames = func(oldName, newName string) error {
+				return test.link(directory, oldName, newName, injected)
+			}
+
+			installed, installErr := directory.Install(temporaryName, targetName, expected)
+			if !installed {
+				t.Fatalf("installed=false error=%v, want target linearization", installErr)
+			}
+			if test.wantCause == nil {
+				if !errors.Is(installErr, injected) {
+					t.Fatalf("Install error = %v, want ambiguous link cause", installErr)
+				}
+			} else if !errors.Is(installErr, test.wantCause) {
+				t.Fatalf("Install error = %v, want %v", installErr, test.wantCause)
+			}
+			data, readErr := os.ReadFile(filepath.Join(path, targetName))
+			if readErr != nil || string(data) != test.wantBytes {
+				t.Fatalf("retained target = %q, %v", data, readErr)
+			}
+		})
+	}
+}
+
+type linkThenErrorDirectory struct {
+	anchoredDirectory
+	injected  error
+	syncCalls int
+}
+
+func (directory *linkThenErrorDirectory) Install(oldName, newName string, expected fs.FileInfo) (bool, error) {
+	installed, err := directory.anchoredDirectory.Install(oldName, newName, expected)
+	if err != nil {
+		return installed, err
+	}
+	return installed, directory.injected
+}
+
+func (directory *linkThenErrorDirectory) Sync() error {
+	directory.syncCalls++
+	return directory.anchoredDirectory.Sync()
+}
+
 func TestWriteNoReplaceCancellationAfterTempRemovalStillSyncsCleanup(t *testing.T) {
 	directory := safeTempDir(t)
 	target := filepath.Join(directory, "target")
@@ -363,12 +706,13 @@ type cancelAfterLinkDirectory struct {
 	cancel context.CancelFunc
 }
 
-func (directory *cancelAfterLinkDirectory) Link(oldName, newName string) error {
-	if err := directory.anchoredDirectory.Link(oldName, newName); err != nil {
-		return err
+func (directory *cancelAfterLinkDirectory) Install(oldName, newName string, expected fs.FileInfo) (bool, error) {
+	installed, err := directory.anchoredDirectory.Install(oldName, newName, expected)
+	if err != nil {
+		return installed, err
 	}
 	directory.cancel()
-	return nil
+	return installed, nil
 }
 
 func TestWriteNoReplaceAnchorsParentAgainstSymlinkSwap(t *testing.T) {
@@ -533,11 +877,11 @@ func (directory *faultDirectory) CreateTemp(prefix string) (durableFile, string,
 	return &faultFile{durableFile: file, fault: directory.fault}, name, nil
 }
 
-func (directory *faultDirectory) Link(oldName, newName string) error {
+func (directory *faultDirectory) Install(oldName, newName string, expected fs.FileInfo) (bool, error) {
 	if directory.fault.failStage == StageInstall {
-		return directory.fault.injected
+		return false, directory.fault.injected
 	}
-	return directory.anchoredDirectory.Link(oldName, newName)
+	return directory.anchoredDirectory.Install(oldName, newName, expected)
 }
 
 func (directory *faultDirectory) Remove(name string) error {

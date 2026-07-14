@@ -22,17 +22,18 @@ var (
 type Stage string
 
 const (
-	StageValidatePath Stage = "validate-path"
-	StageCreateTemp   Stage = "create-temp"
-	StageSetMode      Stage = "set-mode"
-	StageWrite        Stage = "write"
-	StageShortWrite   Stage = "short-write"
-	StageSyncFile     Stage = "sync-file"
-	StageCloseFile    Stage = "close-file"
-	StageInstall      Stage = "install"
-	StageSyncInstall  Stage = "sync-install"
-	StageRemoveTemp   Stage = "remove-temp"
-	StageSyncCleanup  Stage = "sync-cleanup"
+	StageValidatePath   Stage = "validate-path"
+	StageCreateTemp     Stage = "create-temp"
+	StageSetMode        Stage = "set-mode"
+	StageWrite          Stage = "write"
+	StageShortWrite     Stage = "short-write"
+	StageSyncFile       Stage = "sync-file"
+	StageCloseFile      Stage = "close-file"
+	StageInstall        Stage = "install"
+	StageSyncInstall    Stage = "sync-install"
+	StageRemoveTemp     Stage = "remove-temp"
+	StageSyncCleanup    Stage = "sync-cleanup"
+	StageCloseDirectory Stage = "close-directory"
 )
 
 type Result struct {
@@ -63,6 +64,7 @@ type durableFile interface {
 	io.Writer
 	Chmod(fs.FileMode) error
 	Sync() error
+	Stat() (fs.FileInfo, error)
 	Close() error
 	Name() string
 }
@@ -70,10 +72,10 @@ type durableFile interface {
 type anchoredDirectory interface {
 	CreateTemp(string) (durableFile, string, error)
 	Lstat(string) (fs.FileInfo, error)
-	Link(string, string) error
+	Install(string, string, fs.FileInfo) (bool, error)
 	Remove(string) error
 	Sync() error
-	StillAnchored() bool
+	CheckAnchored() error
 	Close() error
 }
 
@@ -91,13 +93,12 @@ func defaultOperations() operations {
 				return nil, err
 			}
 			if expected == nil || !os.SameFile(expected, anchoredInfo) {
-				_ = root.Close()
-				return nil, fmt.Errorf("%w: parent identity changed while anchoring", ErrUnsafePath)
+				identityErr := fmt.Errorf("%w: parent identity changed while anchoring", ErrUnsafePath)
+				return nil, errors.Join(identityErr, root.Close())
 			}
 			directory := &osRootDirectory{root: root, path: path, identity: anchoredInfo}
-			if !directory.StillAnchored() {
-				_ = root.Close()
-				return nil, fmt.Errorf("%w: parent changed while it was anchored", ErrUnsafePath)
+			if anchorErr := directory.CheckAnchored(); anchorErr != nil {
+				return nil, errors.Join(fmt.Errorf("%w: parent changed while it was anchored: %w", ErrUnsafePath, anchorErr), root.Close())
 			}
 			return directory, nil
 		},
@@ -105,9 +106,16 @@ func defaultOperations() operations {
 }
 
 type osRootDirectory struct {
-	root     *os.Root
-	path     string
-	identity fs.FileInfo
+	root         *os.Root
+	path         string
+	identity     fs.FileInfo
+	openSyncFile func() (directorySyncFile, error)
+	linkNames    func(string, string) error
+}
+
+type directorySyncFile interface {
+	Sync() error
+	Close() error
 }
 
 func (directory *osRootDirectory) CreateTemp(prefix string) (durableFile, string, error) {
@@ -133,8 +141,36 @@ func (directory *osRootDirectory) Lstat(name string) (fs.FileInfo, error) {
 	return directory.root.Lstat(name)
 }
 
-func (directory *osRootDirectory) Link(oldName, newName string) error {
-	return directory.root.Link(oldName, newName)
+func (directory *osRootDirectory) Install(oldName, newName string, expected fs.FileInfo) (bool, error) {
+	current, err := directory.root.Lstat(oldName)
+	if err != nil {
+		return false, fmt.Errorf("%w: inspect temporary name before install: %w", ErrUnsafePath, err)
+	}
+	if !sameFileSnapshot(expected, current) {
+		return false, fmt.Errorf("%w: temporary name identity changed before install", ErrUnsafePath)
+	}
+	linkNames := directory.linkNames
+	if linkNames == nil {
+		linkNames = directory.root.Link
+	}
+	linkErr := linkNames(oldName, newName)
+	target, targetErr := directory.root.Lstat(newName)
+	if linkErr == nil {
+		if targetErr != nil {
+			return true, fmt.Errorf("%w: inspect installed target: %w", ErrUnsafePath, targetErr)
+		}
+		if !sameFileSnapshot(expected, target) {
+			return true, fmt.Errorf("%w: installed target identity differs from synchronized temporary file", ErrUnsafePath)
+		}
+		return true, nil
+	}
+	if targetErr == nil && sameFileSnapshot(expected, target) {
+		return true, linkErr
+	}
+	if targetErr != nil && !errors.Is(targetErr, fs.ErrNotExist) {
+		return false, errors.Join(linkErr, fmt.Errorf("%w: reconcile failed install target: %w", ErrUnsafePath, targetErr))
+	}
+	return false, linkErr
 }
 
 func (directory *osRootDirectory) Remove(name string) error {
@@ -142,33 +178,46 @@ func (directory *osRootDirectory) Remove(name string) error {
 }
 
 func (directory *osRootDirectory) Sync() error {
-	file, err := directory.root.Open(".")
+	openSyncFile := directory.openSyncFile
+	if openSyncFile == nil {
+		openSyncFile = func() (directorySyncFile, error) {
+			return directory.root.Open(".")
+		}
+	}
+	file, err := openSyncFile()
 	if err != nil {
 		return err
 	}
-	if err := file.Sync(); err != nil {
-		_ = file.Close()
-		return err
-	}
-	return file.Close()
+	syncErr := file.Sync()
+	closeErr := file.Close()
+	return errors.Join(syncErr, closeErr)
 }
 
-func (directory *osRootDirectory) StillAnchored() bool {
+func (directory *osRootDirectory) CheckAnchored() error {
 	pathRoot, current, err := openDirectoryChain(directory.path)
 	if err != nil {
-		return false
+		return err
 	}
 	pathCloseErr := pathRoot.Close()
-	if pathCloseErr != nil || !os.SameFile(current, directory.identity) {
-		return false
+	if pathCloseErr != nil {
+		return fmt.Errorf("close re-opened parent anchor: %w", pathCloseErr)
+	}
+	if !os.SameFile(current, directory.identity) {
+		return fmt.Errorf("%w: parent path identity changed", ErrUnsafePath)
 	}
 	opened, err := directory.root.Open(".")
 	if err != nil {
-		return false
+		return fmt.Errorf("open anchored parent: %w", err)
 	}
 	openedInfo, statErr := opened.Stat()
 	closeErr := opened.Close()
-	return statErr == nil && closeErr == nil && os.SameFile(openedInfo, directory.identity)
+	if statErr != nil || closeErr != nil {
+		return errors.Join(statErr, closeErr)
+	}
+	if !os.SameFile(openedInfo, directory.identity) {
+		return fmt.Errorf("%w: open parent anchor identity changed", ErrUnsafePath)
+	}
+	return nil
 }
 
 func (directory *osRootDirectory) Close() error {
@@ -190,7 +239,7 @@ func writeNoReplace(ctx context.Context, destination string, data []byte, ops op
 	return writeNoReplaceWithParent(ctx, destination, data, nil, ops)
 }
 
-func writeNoReplaceWithParent(ctx context.Context, destination string, data []byte, requiredParent fs.FileInfo, ops operations) (Result, error) {
+func writeNoReplaceWithParent(ctx context.Context, destination string, data []byte, requiredParent fs.FileInfo, ops operations) (result Result, resultErr error) {
 	if ctx == nil {
 		return failure(StageValidatePath, false, fmt.Errorf("%w: context is nil", ErrInvalid))
 	}
@@ -211,14 +260,29 @@ func writeNoReplaceWithParent(ctx context.Context, destination string, data []by
 	if err != nil {
 		return failure(StageValidatePath, false, errors.Join(ErrUnsafePath, err))
 	}
-	defer func() { _ = parent.Close() }()
-	if !parent.StillAnchored() {
-		return failure(StageValidatePath, false, fmt.Errorf("%w: parent anchor changed", ErrUnsafePath))
+	defer func() {
+		closeErr := parent.Close()
+		if closeErr == nil {
+			return
+		}
+		if resultErr == nil {
+			resultErr = &Error{Stage: StageCloseDirectory, Installed: result.Installed, Err: closeErr}
+			return
+		}
+		var writeErr *Error
+		if errors.As(resultErr, &writeErr) {
+			writeErr.Err = errors.Join(writeErr.Err, closeErr)
+			return
+		}
+		resultErr = errors.Join(resultErr, closeErr)
+	}()
+	if err := parent.CheckAnchored(); err != nil {
+		return failure(StageValidatePath, false, fmt.Errorf("%w: parent anchor changed: %w", ErrUnsafePath, err))
 	}
 	if _, err := parent.Lstat(targetName); err == nil {
 		return failure(StageValidatePath, false, ErrExists)
 	} else if !errors.Is(err, fs.ErrNotExist) {
-		return failure(StageValidatePath, false, fmt.Errorf("%w: cannot inspect destination", ErrUnsafePath))
+		return failure(StageValidatePath, false, fmt.Errorf("%w: cannot inspect destination: %w", ErrUnsafePath, err))
 	}
 
 	temporary, temporaryName, err := parent.CreateTemp("." + targetName + ".tmp-")
@@ -264,6 +328,13 @@ func writeNoReplaceWithParent(ctx context.Context, destination string, data []by
 	if err := temporary.Sync(); err != nil {
 		return failBeforeInstall(StageSyncFile, err)
 	}
+	temporaryInfo, err := temporary.Stat()
+	if err != nil {
+		return failBeforeInstall(StageInstall, err)
+	}
+	if !temporaryInfo.Mode().IsRegular() {
+		return failBeforeInstall(StageInstall, fmt.Errorf("%w: synchronized temporary file is not regular", ErrUnsafePath))
+	}
 	if err := temporary.Close(); err != nil {
 		closed = true
 		return cleanupFailure(parent, temporaryName, false, false, StageCloseFile, err)
@@ -272,28 +343,31 @@ func writeNoReplaceWithParent(ctx context.Context, destination string, data []by
 	if err := ctx.Err(); err != nil {
 		return cleanupFailure(parent, temporaryName, false, false, StageInstall, err)
 	}
-	if !parent.StillAnchored() {
-		return cleanupFailure(parent, temporaryName, false, false, StageInstall, fmt.Errorf("%w: parent anchor changed", ErrUnsafePath))
+	if err := parent.CheckAnchored(); err != nil {
+		return cleanupFailure(parent, temporaryName, false, false, StageInstall, fmt.Errorf("%w: parent anchor changed: %w", ErrUnsafePath, err))
 	}
-	if err := parent.Link(temporaryName, targetName); err != nil {
-		cause := err
-		if errors.Is(err, fs.ErrExist) {
-			cause = errors.Join(ErrExists, err)
+	installed, installErr := parent.Install(temporaryName, targetName, temporaryInfo)
+	if !installed {
+		cause := installErr
+		if cause == nil {
+			cause = fmt.Errorf("%w: install returned neither a target nor an error", ErrUnsafePath)
+		}
+		if errors.Is(cause, fs.ErrExist) {
+			cause = errors.Join(ErrExists, cause)
 		}
 		return cleanupFailure(parent, temporaryName, false, false, StageInstall, cause)
 	}
-	installed := true
-	if !parent.StillAnchored() {
-		return cleanupFailure(parent, temporaryName, installed, false, StageSyncInstall, fmt.Errorf("%w: parent anchor changed", ErrUnsafePath))
+	if err := parent.CheckAnchored(); err != nil {
+		return cleanupFailure(parent, temporaryName, installed, false, StageSyncInstall, errors.Join(installErr, fmt.Errorf("%w: parent anchor changed: %w", ErrUnsafePath, err)))
 	}
 	if err := ctx.Err(); err != nil {
-		return cleanupFailure(parent, temporaryName, installed, false, StageSyncInstall, err)
+		return cleanupFailure(parent, temporaryName, installed, false, StageSyncInstall, errors.Join(installErr, err))
 	}
 	if err := parent.Sync(); err != nil {
-		return cleanupFailure(parent, temporaryName, installed, false, StageSyncInstall, err)
+		return cleanupFailure(parent, temporaryName, installed, false, StageSyncInstall, errors.Join(installErr, err))
 	}
 	if err := parent.Remove(temporaryName); err != nil {
-		return cleanupFailure(parent, temporaryName, installed, true, StageRemoveTemp, err)
+		return cleanupFailure(parent, temporaryName, installed, true, StageRemoveTemp, errors.Join(installErr, err))
 	}
 	contextErr := ctx.Err()
 	syncErr := parent.Sync()
@@ -307,11 +381,14 @@ func writeNoReplaceWithParent(ctx context.Context, destination string, data []by
 	if contextErr != nil {
 		completionErr = errors.Join(completionErr, contextErr)
 	}
-	if !parent.StillAnchored() {
-		completionErr = errors.Join(completionErr, fmt.Errorf("%w: parent anchor changed after cleanup sync", ErrUnsafePath))
+	if err := parent.CheckAnchored(); err != nil {
+		completionErr = errors.Join(completionErr, fmt.Errorf("%w: parent anchor changed after cleanup sync: %w", ErrUnsafePath, err))
 	}
 	if completionErr != nil {
-		return failure(StageSyncCleanup, installed, completionErr)
+		return failure(StageSyncCleanup, installed, errors.Join(installErr, completionErr))
+	}
+	if installErr != nil {
+		return failure(StageInstall, installed, installErr)
 	}
 	return Result{Installed: true}, nil
 }
@@ -327,64 +404,86 @@ func openDirectoryChain(directory string) (*os.Root, fs.FileInfo, error) {
 	if len(components) == 1 && components[0] == "" {
 		root, err := os.OpenRoot(volumeRoot)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, fmt.Errorf("%w: open volume root: %w", ErrUnsafePath, err)
 		}
 		opened, err := root.Open(".")
 		if err != nil {
-			_ = root.Close()
-			return nil, nil, err
+			return nil, nil, closeRootErrors(fmt.Errorf("%w: open volume root directory: %w", ErrUnsafePath, err), root)
 		}
 		info, statErr := opened.Stat()
 		closeErr := opened.Close()
 		if statErr != nil || closeErr != nil {
-			_ = root.Close()
-			return nil, nil, fmt.Errorf("cannot inspect volume root")
+			inspectionErr := errors.Join(
+				wrapCause(ErrUnsafePath, "stat volume root directory", statErr),
+				wrapCause(ErrUnsafePath, "close volume root inspection", closeErr),
+			)
+			return nil, nil, closeRootErrors(inspectionErr, root)
 		}
 		return root, info, nil
 	}
 
 	current, err := os.OpenRoot(volumeRoot)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("%w: open volume root: %w", ErrUnsafePath, err)
 	}
 	var final fs.FileInfo
 	for _, component := range components {
 		if component == "" {
-			_ = current.Close()
-			return nil, nil, fmt.Errorf("%w: empty parent path component", ErrUnsafePath)
+			return nil, nil, closeRootErrors(fmt.Errorf("%w: empty parent path component", ErrUnsafePath), current)
 		}
 		expected, lstatErr := current.Lstat(component)
-		if lstatErr != nil || expected.Mode()&fs.ModeSymlink != 0 || !expected.IsDir() {
-			_ = current.Close()
-			return nil, nil, fmt.Errorf("%w: parent component is not a real directory", ErrUnsafePath)
+		if lstatErr != nil {
+			return nil, nil, closeRootErrors(fmt.Errorf("%w: inspect parent component %q: %w", ErrUnsafePath, component, lstatErr), current)
+		}
+		if expected.Mode()&fs.ModeSymlink != 0 || !expected.IsDir() {
+			return nil, nil, closeRootErrors(fmt.Errorf("%w: parent component %q is not a real directory", ErrUnsafePath, component), current)
 		}
 		child, openErr := current.OpenRoot(component)
 		if openErr != nil {
-			_ = current.Close()
-			return nil, nil, fmt.Errorf("%w: cannot anchor parent component", ErrUnsafePath)
+			return nil, nil, closeRootErrors(fmt.Errorf("%w: anchor parent component %q: %w", ErrUnsafePath, component, openErr), current)
 		}
 		opened, statErr := child.Open(".")
 		if statErr != nil {
-			_ = child.Close()
-			_ = current.Close()
-			return nil, nil, fmt.Errorf("%w: cannot inspect anchored parent component", ErrUnsafePath)
+			return nil, nil, closeRootErrors(fmt.Errorf("%w: open anchored parent component %q: %w", ErrUnsafePath, component, statErr), child, current)
 		}
 		openedInfo, infoErr := opened.Stat()
 		closeFileErr := opened.Close()
 		currentInfo, currentErr := current.Lstat(component)
-		if infoErr != nil || closeFileErr != nil || currentErr != nil || currentInfo.Mode()&fs.ModeSymlink != 0 || !currentInfo.IsDir() || !openedInfo.IsDir() || !os.SameFile(expected, currentInfo) || !os.SameFile(expected, openedInfo) {
-			_ = child.Close()
-			_ = current.Close()
-			return nil, nil, fmt.Errorf("%w: parent component changed while anchoring", ErrUnsafePath)
+		inspectionErr := errors.Join(
+			wrapCause(ErrUnsafePath, "stat anchored parent component "+component, infoErr),
+			wrapCause(ErrUnsafePath, "close anchored parent component inspection "+component, closeFileErr),
+			wrapCause(ErrUnsafePath, "re-inspect parent component "+component, currentErr),
+		)
+		if inspectionErr != nil {
+			return nil, nil, closeRootErrors(inspectionErr, child, current)
+		}
+		if currentInfo.Mode()&fs.ModeSymlink != 0 || !currentInfo.IsDir() || !openedInfo.IsDir() || !os.SameFile(expected, currentInfo) || !os.SameFile(expected, openedInfo) {
+			return nil, nil, closeRootErrors(fmt.Errorf("%w: parent component %q changed while anchoring", ErrUnsafePath, component), child, current)
 		}
 		if closeErr := current.Close(); closeErr != nil {
-			_ = child.Close()
-			return nil, nil, closeErr
+			return nil, nil, closeRootErrors(fmt.Errorf("%w: close parent anchor before descending into %q: %w", ErrUnsafePath, component, closeErr), child)
 		}
 		current = child
 		final = openedInfo
 	}
 	return current, final, nil
+}
+
+func wrapCause(category error, operation string, cause error) error {
+	if cause == nil {
+		return nil
+	}
+	return fmt.Errorf("%w: %s: %w", category, operation, cause)
+}
+
+func closeRootErrors(primary error, roots ...*os.Root) error {
+	causes := []error{primary}
+	for _, root := range roots {
+		if root != nil {
+			causes = append(causes, root.Close())
+		}
+	}
+	return errors.Join(causes...)
 }
 
 func validateDestination(destination string, ops operations) (string, string, fs.FileInfo, error) {
@@ -416,7 +515,7 @@ func validateDirectoryChain(directory string, ops operations) (fs.FileInfo, erro
 		current = filepath.Join(current, component)
 		info, err := ops.lstat(current)
 		if err != nil {
-			return nil, fmt.Errorf("%w: parent component is unavailable", ErrUnsafePath)
+			return nil, fmt.Errorf("%w: parent component is unavailable: %w", ErrUnsafePath, err)
 		}
 		if info.Mode()&fs.ModeSymlink != 0 || !info.IsDir() {
 			return nil, fmt.Errorf("%w: parent component is not a real directory", ErrUnsafePath)
@@ -425,7 +524,10 @@ func validateDirectoryChain(directory string, ops operations) (fs.FileInfo, erro
 	}
 	if final == nil {
 		info, err := ops.lstat(current)
-		if err != nil || !info.IsDir() || info.Mode()&fs.ModeSymlink != 0 {
+		if err != nil {
+			return nil, fmt.Errorf("%w: parent directory is unavailable: %w", ErrUnsafePath, err)
+		}
+		if !info.IsDir() || info.Mode()&fs.ModeSymlink != 0 {
 			return nil, fmt.Errorf("%w: parent directory is invalid", ErrUnsafePath)
 		}
 		final = info
@@ -457,4 +559,9 @@ func cleanupFailure(parent anchoredDirectory, temporaryName string, installed bo
 
 func failure(stage Stage, installed bool, cause error) (Result, error) {
 	return Result{Installed: installed}, &Error{Stage: stage, Installed: installed, Err: cause}
+}
+
+func sameFileSnapshot(left, right fs.FileInfo) bool {
+	return left != nil && right != nil && left.Mode().IsRegular() && right.Mode().IsRegular() &&
+		os.SameFile(left, right) && left.Mode() == right.Mode() && left.Size() == right.Size() && left.ModTime().Equal(right.ModTime())
 }

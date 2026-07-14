@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -189,6 +190,94 @@ func TestComputeStateUsesIndexContentAcrossWorktreeTransformsAndHostChmod(t *tes
 	}
 	if got.InputDigest != want.InputDigest {
 		t.Fatalf("worktree transform changed digest: got %q want %q", got.InputDigest, want.InputDigest)
+	}
+}
+
+func TestComputeStateIgnoresLocalReplaceRefs(t *testing.T) {
+	t.Run("indexed blob", func(t *testing.T) {
+		repo := committedOneFileRepo(t)
+		want, err := ComputeState(context.Background(), repo.root)
+		if err != nil {
+			t.Fatalf("initial state: %v", err)
+		}
+		originalBlob := strings.TrimSpace(repo.git("rev-parse", ":a"))
+		replacementBlob := strings.TrimSpace(string(runCommand(t, repo.root, []byte("replacement\n"), "git", "hash-object", "-w", "--stdin")))
+		repo.git("replace", originalBlob, replacementBlob)
+		if got := repo.git("cat-file", "blob", originalBlob); got != "replacement\n" {
+			t.Fatalf("replace ref precondition failed: cat-file returned %q", got)
+		}
+
+		got, err := ComputeState(context.Background(), repo.root)
+		if err != nil {
+			t.Fatalf("state with blob replace ref: %v", err)
+		}
+		if got != want {
+			t.Fatalf("blob replace ref changed state: got %+v want %+v", got, want)
+		}
+	})
+
+	t.Run("HEAD commit", func(t *testing.T) {
+		repo := committedOneFileRepo(t)
+		want, err := ComputeState(context.Background(), repo.root)
+		if err != nil {
+			t.Fatalf("initial state: %v", err)
+		}
+		originalCommit := want.SourceCommit
+		repo.write("a", []byte("replacement\n"), 0o644)
+		repo.commitAll("replacement")
+		replacementCommit := strings.TrimSpace(repo.git("rev-parse", "HEAD"))
+		repo.git("reset", "--hard", "--quiet", originalCommit)
+		repo.git("replace", originalCommit, replacementCommit)
+		if got := repo.git("show", "HEAD:a"); got != "replacement\n" {
+			t.Fatalf("replace ref precondition failed: show returned %q", got)
+		}
+
+		got, err := ComputeState(context.Background(), repo.root)
+		if err != nil {
+			t.Fatalf("state with commit replace ref: %v", err)
+		}
+		if got != want {
+			t.Fatalf("commit replace ref changed state: got %+v want %+v", got, want)
+		}
+	})
+}
+
+func TestComputeStateRejectsSameStatWorktreeRewrite(t *testing.T) {
+	repo := newGitFixture(t)
+	repo.write("a", []byte("alpha\n"), 0o644)
+	repo.commitAll("initial")
+	path := filepath.Join(repo.root, "a")
+	oldTime := time.Unix(946684800, 0)
+	if err := os.Chtimes(path, oldTime, oldTime); err != nil {
+		t.Fatalf("age tracked file: %v", err)
+	}
+	repo.git("update-index", "--really-refresh")
+	committedInfo, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat committed file: %v", err)
+	}
+	repo.git("config", "core.trustctime", "false")
+	repo.git("config", "core.checkStat", "minimal")
+	file, err := os.OpenFile(path, os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatalf("open tracked file: %v", err)
+	}
+	if _, err := file.WriteAt([]byte("omega\n"), 0); err != nil {
+		t.Fatalf("rewrite tracked file: %v", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("close tracked file: %v", err)
+	}
+	if err := os.Chtimes(path, committedInfo.ModTime(), committedInfo.ModTime()); err != nil {
+		t.Fatalf("restore tracked file mtime: %v", err)
+	}
+	if output := repo.git("diff", "--name-only", "--", "a"); output != "" {
+		t.Skipf("filesystem/Git cannot reproduce same-stat bypass: diff returned %q", output)
+	}
+
+	_, err = ComputeState(context.Background(), repo.root)
+	if !errors.Is(err, ErrDirty) && !errors.Is(err, ErrStateChanged) {
+		t.Fatalf("same-stat rewrite error = %v, want ErrDirty or ErrStateChanged", err)
 	}
 }
 
@@ -449,6 +538,25 @@ func TestRepositorySnapshotNeverRetriesAwayOneTimeMutation(t *testing.T) {
 	}
 }
 
+func TestComputeStateHashesWorktreeAfterSecondUnstagedDiff(t *testing.T) {
+	repo := committedOneFileRepo(t)
+	runner := &afterNthCommandRunner{
+		delegate: systemGitRunner{},
+		match:    isUnstagedDiffCommand,
+		after:    2,
+		mutate: func() {
+			repo.write("a", []byte("mutated after diff\n"), 0o644)
+		},
+	}
+	_, err := computeState(context.Background(), repo.root, runner)
+	if !errors.Is(err, ErrDirty) && !errors.Is(err, ErrStateChanged) {
+		t.Fatalf("post-diff worktree mutation error = %v, want ErrDirty or ErrStateChanged", err)
+	}
+	if runner.seen != runner.after {
+		t.Fatalf("unstaged diff matches = %d, want %d", runner.seen, runner.after)
+	}
+}
+
 func TestRawIndexSnapshotEqualityIncludesMtime(t *testing.T) {
 	repo := committedOneFileRepo(t)
 	identity, err := os.Stat(filepath.Join(repo.root, ".git", "index"))
@@ -486,6 +594,25 @@ func TestComputeStateSanitizesHostileGitEnvironment(t *testing.T) {
 	}
 }
 
+func TestSanitizedGitEnvironmentForcesReplaceRefsOff(t *testing.T) {
+	environment := sanitizedGitEnvironment([]string{
+		"PATH=/usr/bin",
+		"GIT_DIR=/attacker",
+		"GIT_NO_REPLACE_OBJECTS=0",
+		"LC_ALL=attacker",
+	})
+	want := []string{
+		"PATH=/usr/bin",
+		"LC_ALL=C",
+		"LANG=C",
+		"GIT_OPTIONAL_LOCKS=0",
+		"GIT_NO_REPLACE_OBJECTS=1",
+	}
+	if !slices.Equal(environment, want) {
+		t.Fatalf("sanitized environment = %q, want %q", environment, want)
+	}
+}
+
 type gitFixture struct {
 	t    *testing.T
 	root string
@@ -504,6 +631,14 @@ type afterCommandRunner struct {
 	mutated  bool
 }
 
+type afterNthCommandRunner struct {
+	delegate commandRunner
+	match    func([]string) bool
+	after    int
+	mutate   func()
+	seen     int
+}
+
 func (runner *afterCommandRunner) Run(ctx context.Context, root string, arguments ...string) ([]byte, error) {
 	output, err := runner.delegate.Run(ctx, root, arguments...)
 	if err == nil && !runner.mutated && runner.match(arguments) {
@@ -513,10 +648,26 @@ func (runner *afterCommandRunner) Run(ctx context.Context, root string, argument
 	return output, err
 }
 
+func (runner *afterNthCommandRunner) Run(ctx context.Context, root string, arguments ...string) ([]byte, error) {
+	output, err := runner.delegate.Run(ctx, root, arguments...)
+	if err == nil && runner.match(arguments) {
+		runner.seen++
+		if runner.seen == runner.after {
+			runner.mutate()
+		}
+	}
+	return output, err
+}
+
 func isFinalStatusCommand(arguments []string) bool {
 	return len(arguments) == 7 && arguments[0] == "-c" && arguments[1] == "core.fileMode=false" &&
 		arguments[2] == "ls-files" && arguments[3] == "--others" && arguments[4] == "--ignored" &&
 		arguments[5] == "-z" && arguments[6] == "--exclude-standard"
+}
+
+func isUnstagedDiffCommand(arguments []string) bool {
+	want := []string{"-c", "core.fileMode=false", "diff", "--name-only", "--no-renames", "-z", "--"}
+	return slices.Equal(arguments, want)
 }
 
 func (runner *mutatingCommandRunner) Run(ctx context.Context, root string, arguments ...string) ([]byte, error) {

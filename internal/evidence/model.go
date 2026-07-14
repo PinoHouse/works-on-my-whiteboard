@@ -154,6 +154,20 @@ var (
 	goVersionPattern  = regexp.MustCompile(`^(?:go[0-9][0-9A-Za-z ._:+-]*|devel go[0-9A-Za-z][0-9A-Za-z ._:+-]*)$`)
 )
 
+func ValidateStableID(value string) error {
+	if !stableIDPattern.MatchString(value) {
+		return fmt.Errorf("%w: stable ID %q is invalid", ErrInvalidRecord, value)
+	}
+	return nil
+}
+
+func ValidateMetricID(value string) error {
+	if !metricIDPattern.MatchString(value) {
+		return fmt.Errorf("%w: metric ID %q is invalid", ErrInvalidRecord, value)
+	}
+	return nil
+}
+
 func Seal(source Record) (Record, error) {
 	record := cloneAndNormalize(source)
 	record.ContentDigest = ""
@@ -259,7 +273,7 @@ func validateRecord(record Record, requireDigest bool) error {
 		if identity.value == "" && !identity.required {
 			continue
 		}
-		if !stableIDPattern.MatchString(identity.value) {
+		if err := ValidateStableID(identity.value); err != nil {
 			return invalid("%s is invalid", identity.name)
 		}
 	}
@@ -316,7 +330,7 @@ func validateRecord(record Record, requireDigest bool) error {
 	}
 	seenFaults := make(map[string]struct{}, len(record.Faults))
 	for _, fault := range record.Faults {
-		if !stableIDPattern.MatchString(fault.ID) || fault.At < 0 || fault.Duration < 0 {
+		if ValidateStableID(fault.ID) != nil || fault.At < 0 || fault.Duration < 0 {
 			return invalid("fault is invalid")
 		}
 		if _, exists := seenFaults[fault.ID]; exists {
@@ -325,13 +339,13 @@ func validateRecord(record Record, requireDigest bool) error {
 		seenFaults[fault.ID] = struct{}{}
 	}
 	for id, measurement := range record.Measurements {
-		if !metricIDPattern.MatchString(id) || !utf8.ValidString(measurement.Unit) || strings.TrimSpace(measurement.Unit) == "" || measurement.Unit != strings.TrimSpace(measurement.Unit) {
+		if ValidateMetricID(id) != nil || !utf8.ValidString(measurement.Unit) || strings.TrimSpace(measurement.Unit) == "" || measurement.Unit != strings.TrimSpace(measurement.Unit) {
 			return invalid("measurement %q is invalid", id)
 		}
 	}
 	seenAssertions := make(map[string]struct{}, len(record.Assertions))
 	for _, assertion := range record.Assertions {
-		if !stableIDPattern.MatchString(assertion.ID) || !utf8.ValidString(assertion.Message) {
+		if ValidateStableID(assertion.ID) != nil || !utf8.ValidString(assertion.Message) {
 			return invalid("assertion ID is invalid")
 		}
 		if _, exists := seenAssertions[assertion.ID]; exists {
@@ -346,7 +360,7 @@ func validateRecord(record Record, requireDigest bool) error {
 		return invalid("non-passed record needs a diagnostic")
 	}
 	for _, diagnostic := range record.Diagnostics {
-		if !diagnosticPattern.MatchString(diagnostic.Code) || diagnostic.Event != "" && !stableIDPattern.MatchString(diagnostic.Event) || !utf8.ValidString(diagnostic.Message) || strings.TrimSpace(diagnostic.Message) == "" {
+		if !diagnosticPattern.MatchString(diagnostic.Code) || diagnostic.Event != "" && ValidateStableID(diagnostic.Event) != nil || !utf8.ValidString(diagnostic.Message) || strings.TrimSpace(diagnostic.Message) == "" {
 			return invalid("diagnostic is invalid")
 		}
 	}

@@ -30,7 +30,15 @@ type systemGitRunner struct{}
 type inspectionIndexContextKey struct{}
 
 func (systemGitRunner) Run(ctx context.Context, root string, arguments ...string) ([]byte, error) {
-	commandArguments := append([]string{"-C", root}, arguments...)
+	commandArguments := []string{
+		"-C", root,
+		"-c", "core.trustctime=true",
+		"-c", "core.checkStat=default",
+		"-c", "core.fsmonitor=false",
+		"-c", "core.untrackedCache=false",
+		"-c", "core.ignoreStat=false",
+	}
+	commandArguments = append(commandArguments, arguments...)
 	command := exec.CommandContext(ctx, "git", commandArguments...)
 	command.Env = sanitizedGitEnvironment(os.Environ())
 	if indexPath, ok := ctx.Value(inspectionIndexContextKey{}).(string); ok && indexPath != "" {
@@ -48,7 +56,7 @@ func (systemGitRunner) Run(ctx context.Context, root string, arguments ...string
 }
 
 func sanitizedGitEnvironment(source []string) []string {
-	environment := make([]string, 0, len(source)+2)
+	environment := make([]string, 0, len(source)+4)
 	for _, item := range source {
 		name, _, _ := strings.Cut(item, "=")
 		if strings.HasPrefix(name, "GIT_") || name == "LC_ALL" || name == "LANG" {
@@ -56,7 +64,7 @@ func sanitizedGitEnvironment(source []string) []string {
 		}
 		environment = append(environment, item)
 	}
-	return append(environment, "LC_ALL=C", "LANG=C", "GIT_OPTIONAL_LOCKS=0")
+	return append(environment, "LC_ALL=C", "LANG=C", "GIT_OPTIONAL_LOCKS=0", "GIT_NO_REPLACE_OBJECTS=1")
 }
 
 func Compute(ctx context.Context, root string) (Digest, error) {
@@ -186,6 +194,7 @@ type repositorySnapshot struct {
 	unstaged  []byte
 	untracked []byte
 	ignored   []byte
+	worktree  []byte
 }
 
 func (snapshot repositorySnapshot) equal(other repositorySnapshot) bool {
@@ -196,7 +205,8 @@ func (snapshot repositorySnapshot) equal(other repositorySnapshot) bool {
 		bytes.Equal(snapshot.staged, other.staged) &&
 		bytes.Equal(snapshot.unstaged, other.unstaged) &&
 		bytes.Equal(snapshot.untracked, other.untracked) &&
-		bytes.Equal(snapshot.ignored, other.ignored)
+		bytes.Equal(snapshot.ignored, other.ignored) &&
+		bytes.Equal(snapshot.worktree, other.worktree)
 }
 
 func captureRepositorySnapshot(ctx context.Context, root string, runner commandRunner) (repositorySnapshot, error) {
@@ -253,6 +263,14 @@ func captureRepositorySnapshotOnce(ctx context.Context, root string, runner comm
 		}
 		*command.destination = append([]byte(nil), output...)
 	}
+	indexEntries, err := parseIndexEntries(snapshot.index)
+	if err != nil {
+		return repositorySnapshot{}, err
+	}
+	snapshot.worktree, err = captureWorktreeFingerprint(inspectionContext, root, runner, indexEntries)
+	if err != nil {
+		return repositorySnapshot{}, err
+	}
 	rawAfter, err := readRawIndex(ctx, root, runner)
 	if err != nil {
 		return repositorySnapshot{}, err
@@ -286,6 +304,34 @@ func captureRepositorySnapshotOnce(ctx context.Context, root string, runner comm
 	snapshot.rawIndex = rawBefore
 	snapshot.rawIndex.Data = nil
 	return snapshot, nil
+}
+
+func captureWorktreeFingerprint(ctx context.Context, root string, runner commandRunner, entries []indexEntry) ([]byte, error) {
+	fingerprint := make([]byte, 0, len(entries)*(sha256.Size*2+2))
+	for _, entry := range entries {
+		if isExcludedTrackedArtifact(entry.path) {
+			continue
+		}
+		output, err := runner.Run(ctx, root, "hash-object", "--path="+entry.path, "--", entry.path)
+		if err != nil {
+			if contextErr := ctx.Err(); contextErr != nil {
+				return nil, contextErr
+			}
+			return nil, fmt.Errorf("%w: cannot hash tracked worktree path %q: %v", ErrDirty, entry.path, err)
+		}
+		objectID := strings.TrimSpace(string(output))
+		if !objectIDPattern.MatchString(objectID) {
+			return nil, fmt.Errorf("%w: Git returned an invalid worktree object ID for %q", ErrRepository, entry.path)
+		}
+		fingerprint = append(fingerprint, entry.path...)
+		fingerprint = append(fingerprint, 0)
+		fingerprint = append(fingerprint, objectID...)
+		fingerprint = append(fingerprint, 0)
+		if objectID != entry.objectID {
+			return nil, fmt.Errorf("%w: tracked path %q differs from the index", ErrDirty, entry.path)
+		}
+	}
+	return fingerprint, nil
 }
 
 type rawIndexSnapshot struct {

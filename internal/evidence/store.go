@@ -37,6 +37,66 @@ type evidenceReadOperations struct {
 	closeDirectory func(*os.File) error
 }
 
+type evidenceAnchorOperations struct {
+	openRoot      func(string) (*os.Root, error)
+	lstat         func(*os.Root, string) (fs.FileInfo, error)
+	openChild     func(*os.Root, string) (*os.Root, error)
+	openDirectory func(*os.Root) (*os.File, error)
+	statFile      func(*os.File) (fs.FileInfo, error)
+	closeFile     func(*os.File) error
+	closeRoot     func(*os.Root) error
+}
+
+func defaultEvidenceAnchorOperations() evidenceAnchorOperations {
+	return evidenceAnchorOperations{
+		openRoot: os.OpenRoot,
+		lstat: func(root *os.Root, name string) (fs.FileInfo, error) {
+			return root.Lstat(name)
+		},
+		openChild: func(root *os.Root, name string) (*os.Root, error) {
+			return root.OpenRoot(name)
+		},
+		openDirectory: func(root *os.Root) (*os.File, error) {
+			return root.Open(".")
+		},
+		statFile: func(file *os.File) (fs.FileInfo, error) {
+			return file.Stat()
+		},
+		closeFile: func(file *os.File) error {
+			return file.Close()
+		},
+		closeRoot: func(root *os.Root) error {
+			return root.Close()
+		},
+	}
+}
+
+func (operations evidenceAnchorOperations) withDefaults() evidenceAnchorOperations {
+	defaults := defaultEvidenceAnchorOperations()
+	if operations.openRoot == nil {
+		operations.openRoot = defaults.openRoot
+	}
+	if operations.lstat == nil {
+		operations.lstat = defaults.lstat
+	}
+	if operations.openChild == nil {
+		operations.openChild = defaults.openChild
+	}
+	if operations.openDirectory == nil {
+		operations.openDirectory = defaults.openDirectory
+	}
+	if operations.statFile == nil {
+		operations.statFile = defaults.statFile
+	}
+	if operations.closeFile == nil {
+		operations.closeFile = defaults.closeFile
+	}
+	if operations.closeRoot == nil {
+		operations.closeRoot = defaults.closeRoot
+	}
+	return operations
+}
+
 func defaultEvidenceReadOperations() evidenceReadOperations {
 	return evidenceReadOperations{
 		lstat: func(root *os.Root, name string) (fs.FileInfo, error) {
@@ -101,6 +161,7 @@ type Store struct {
 	runsIdentity   fs.FileInfo
 	writeNoReplace immutableWriteFunc
 	readOps        evidenceReadOperations
+	anchorOps      evidenceAnchorOperations
 }
 
 func NewStore(root string) (*Store, error) {
@@ -122,14 +183,15 @@ func NewStore(root string) (*Store, error) {
 	if err := prepareRealDirectory(runs); err != nil {
 		return nil, err
 	}
-	runsRoot, err := openRealDirectory(runs)
+	anchorOps := defaultEvidenceAnchorOperations()
+	runsRoot, err := openRealDirectoryWithOperations(runs, anchorOps)
 	if err != nil {
 		return nil, err
 	}
-	runsIdentity, infoErr := rootDirectoryInfo(runsRoot)
-	closeErr := runsRoot.Close()
+	runsIdentity, infoErr := rootDirectoryInfoWithOperations(runsRoot, anchorOps)
+	closeErr := anchorOps.closeRoot(runsRoot)
 	if infoErr != nil || closeErr != nil {
-		return nil, fmt.Errorf("%w: capture runs directory identity", ErrEvidenceUnsafePath)
+		return nil, errors.Join(infoErr, wrapEvidenceIO("close captured runs directory identity", closeErr))
 	}
 	return &Store{
 		root:         absolute,
@@ -138,7 +200,8 @@ func NewStore(root string) (*Store, error) {
 		writeNoReplace: func(ctx context.Context, destination string, expected fs.FileInfo, data []byte) (immutablefile.Result, error) {
 			return immutablefile.WriteNoReplaceExpected(ctx, destination, expected, data)
 		},
-		readOps: defaultEvidenceReadOperations(),
+		readOps:   defaultEvidenceReadOperations(),
+		anchorOps: anchorOps,
 	}, nil
 }
 
@@ -201,7 +264,7 @@ func (store *Store) Get(ctx context.Context, id string) (Record, error) {
 	}
 	readOps := store.readOps.withDefaults()
 	record, operationErr := getFromRoot(ctx, root, id, ErrEvidenceNotFound, readOps)
-	if closeErr := root.Close(); closeErr != nil {
+	if closeErr := store.anchorOps.withDefaults().closeRoot(root); closeErr != nil {
 		operationErr = preferEvidenceIO(operationErr, "close runs anchor", closeErr)
 	}
 	if err := store.finishRunsOperation(operationErr); err != nil {
@@ -296,6 +359,13 @@ func evidenceIO(operation string, cause error) error {
 	return fmt.Errorf("%w: %s: %w", ErrEvidenceIO, operation, cause)
 }
 
+func wrapEvidenceIO(operation string, cause error) error {
+	if cause == nil {
+		return nil
+	}
+	return evidenceIO(operation, cause)
+}
+
 func preferEvidenceIO(prior error, operation string, cause error) error {
 	if prior == nil {
 		return evidenceIO(operation, cause)
@@ -319,7 +389,7 @@ func classifyOpenFailure(root *os.Root, name, label string, expected fs.FileInfo
 		return evidenceIO("open and re-inspect "+label, errors.Join(openErr, currentErr))
 	}
 	if operationErr := classifySnapshot(expected, current, currentErr, label, "while opening"); operationErr != nil {
-		return operationErr
+		return errors.Join(operationErr, fmt.Errorf("open %s: %w", label, openErr))
 	}
 	return evidenceIO("open "+label, openErr)
 }
@@ -353,7 +423,7 @@ func (store *Store) List(ctx context.Context) ([]Record, error) {
 	}
 	readOps := store.readOps.withDefaults()
 	records, operationErr := store.listFromRoot(ctx, root, readOps)
-	if closeErr := root.Close(); closeErr != nil {
+	if closeErr := store.anchorOps.withDefaults().closeRoot(root); closeErr != nil {
 		operationErr = preferEvidenceIO(operationErr, "close runs anchor", closeErr)
 	}
 	if err := store.finishRunsOperation(operationErr); err != nil {
@@ -473,14 +543,18 @@ func (store *Store) openRuns() (*os.Root, error) {
 	if store == nil || store.runs == "" || store.runsIdentity == nil {
 		return nil, fmt.Errorf("%w: store is not initialized", ErrEvidenceUnsafePath)
 	}
-	root, err := openRealDirectory(store.runs)
+	anchorOps := store.anchorOps.withDefaults()
+	root, err := openRealDirectoryWithOperations(store.runs, anchorOps)
 	if err != nil {
 		return nil, err
 	}
-	openedIdentity, err := rootDirectoryInfo(root)
-	if err != nil || !os.SameFile(store.runsIdentity, openedIdentity) {
-		_ = root.Close()
-		return nil, fmt.Errorf("%w: runs directory identity differs from NewStore", ErrEvidenceUnsafePath)
+	openedIdentity, err := rootDirectoryInfoWithOperations(root, anchorOps)
+	if err != nil {
+		return nil, closeEvidenceRoots(err, anchorOps, root)
+	}
+	if !os.SameFile(store.runsIdentity, openedIdentity) {
+		identityErr := fmt.Errorf("%w: runs directory identity differs from NewStore", ErrEvidenceUnsafePath)
+		return nil, closeEvidenceRoots(identityErr, anchorOps, root)
 	}
 	return root, nil
 }
@@ -488,31 +562,36 @@ func (store *Store) openRuns() (*os.Root, error) {
 func (store *Store) finishRunsOperation(operationErr error) error {
 	root, identityErr := store.openRuns()
 	if identityErr == nil {
-		if closeErr := root.Close(); closeErr != nil {
+		if closeErr := store.anchorOps.withDefaults().closeRoot(root); closeErr != nil {
 			return preferEvidenceIO(operationErr, "close final runs identity anchor", closeErr)
 		}
 	}
 	if identityErr != nil {
+		if errors.Is(identityErr, ErrEvidenceIO) {
+			return preferEvidenceIO(operationErr, "reopen final runs identity anchor", identityErr)
+		}
 		return errors.Join(identityErr, operationErr)
 	}
 	return operationErr
 }
 
 func rootDirectoryInfo(root *os.Root) (fs.FileInfo, error) {
-	opened, err := root.Open(".")
+	return rootDirectoryInfoWithOperations(root, defaultEvidenceAnchorOperations())
+}
+
+func rootDirectoryInfoWithOperations(root *os.Root, operations evidenceAnchorOperations) (fs.FileInfo, error) {
+	operations = operations.withDefaults()
+	opened, err := operations.openDirectory(root)
 	if err != nil {
-		return nil, err
+		return nil, evidenceIO("open anchored root directory", err)
 	}
-	info, statErr := opened.Stat()
-	closeErr := opened.Close()
-	if statErr != nil {
-		return nil, statErr
-	}
-	if closeErr != nil {
-		return nil, closeErr
+	info, statErr := operations.statFile(opened)
+	closeErr := operations.closeFile(opened)
+	if statErr != nil || closeErr != nil {
+		return nil, evidenceIO("inspect anchored root directory", errors.Join(statErr, closeErr))
 	}
 	if !info.IsDir() {
-		return nil, errors.New("anchored root is not a directory")
+		return nil, fmt.Errorf("%w: anchored root is not a directory", ErrEvidenceUnsafePath)
 	}
 	return info, nil
 }
@@ -538,90 +617,91 @@ func lessRecord(left, right Record) bool {
 }
 
 func prepareRealDirectory(path string) error {
+	operations := defaultEvidenceAnchorOperations()
 	components, volumeRoot, err := absolutePathComponents(path)
 	if err != nil {
 		return err
 	}
-	currentRoot, err := os.OpenRoot(volumeRoot)
+	currentRoot, err := operations.openRoot(volumeRoot)
 	if err != nil {
-		return fmt.Errorf("%w: anchor filesystem root: %w", ErrEvidenceUnsafePath, err)
+		return evidenceIO("anchor filesystem root", err)
 	}
 	currentPath := volumeRoot
 	for _, component := range components {
 		currentPath = filepath.Join(currentPath, component)
-		info, lstatErr := currentRoot.Lstat(component)
+		info, lstatErr := operations.lstat(currentRoot, component)
 		if errors.Is(lstatErr, fs.ErrNotExist) {
 			mkdirErr := currentRoot.Mkdir(component, 0o755)
 			if mkdirErr != nil && !errors.Is(mkdirErr, fs.ErrExist) {
-				_ = currentRoot.Close()
-				return fmt.Errorf("%w: create directory %s: %w", ErrEvidenceUnsafePath, currentPath, mkdirErr)
+				return closeEvidenceRoots(evidenceIO("create directory "+currentPath, mkdirErr), operations, currentRoot)
 			}
-			info, lstatErr = currentRoot.Lstat(component)
+			info, lstatErr = operations.lstat(currentRoot, component)
 		}
 		if lstatErr != nil {
-			_ = currentRoot.Close()
-			return fmt.Errorf("%w: inspect directory %s: %w", ErrEvidenceUnsafePath, currentPath, lstatErr)
+			if errors.Is(lstatErr, fs.ErrNotExist) {
+				return closeEvidenceRoots(fmt.Errorf("%w: directory %s disappeared while preparing", ErrEvidenceUnsafePath, currentPath), operations, currentRoot)
+			}
+			return closeEvidenceRoots(evidenceIO("inspect directory "+currentPath, lstatErr), operations, currentRoot)
 		}
 		if info.Mode()&fs.ModeSymlink != 0 || !info.IsDir() {
-			_ = currentRoot.Close()
-			return fmt.Errorf("%w: component %s is not a real directory", ErrEvidenceUnsafePath, currentPath)
+			return closeEvidenceRoots(fmt.Errorf("%w: component %s is not a real directory", ErrEvidenceUnsafePath, currentPath), operations, currentRoot)
 		}
-		childRoot, openErr := currentRoot.OpenRoot(component)
+		childRoot, openErr := operations.openChild(currentRoot, component)
 		if openErr != nil {
-			_ = currentRoot.Close()
-			return fmt.Errorf("%w: anchor directory %s: %w", ErrEvidenceUnsafePath, currentPath, openErr)
+			classified := classifyAnchorOpenFailure(currentRoot, component, currentPath, info, openErr, operations)
+			return closeEvidenceRoots(classified, operations, currentRoot)
 		}
-		if verifyErr := verifyAnchoredChild(currentRoot, childRoot, component, info); verifyErr != nil {
-			_ = childRoot.Close()
-			_ = currentRoot.Close()
-			return fmt.Errorf("%w: directory component %s changed while anchoring: %v", ErrEvidenceUnsafePath, currentPath, verifyErr)
+		if verifyErr := verifyAnchoredChildWithOperations(currentRoot, childRoot, component, currentPath, info, operations); verifyErr != nil {
+			return closeEvidenceRoots(verifyErr, operations, childRoot, currentRoot)
 		}
-		if closeErr := currentRoot.Close(); closeErr != nil {
-			_ = childRoot.Close()
-			return fmt.Errorf("%w: close parent anchor for %s: %w", ErrEvidenceUnsafePath, currentPath, closeErr)
+		if closeErr := operations.closeRoot(currentRoot); closeErr != nil {
+			return closeEvidenceRoots(evidenceIO("close parent anchor for "+currentPath, closeErr), operations, childRoot)
 		}
 		currentRoot = childRoot
 	}
-	if err := currentRoot.Close(); err != nil {
-		return fmt.Errorf("%w: close prepared directory anchor: %w", ErrEvidenceUnsafePath, err)
+	if err := operations.closeRoot(currentRoot); err != nil {
+		return evidenceIO("close prepared directory anchor", err)
 	}
 	return nil
 }
 
 func openRealDirectory(path string) (*os.Root, error) {
+	return openRealDirectoryWithOperations(path, defaultEvidenceAnchorOperations())
+}
+
+func openRealDirectoryWithOperations(path string, operations evidenceAnchorOperations) (*os.Root, error) {
+	operations = operations.withDefaults()
 	components, volumeRoot, err := absolutePathComponents(path)
 	if err != nil {
 		return nil, err
 	}
-	currentRoot, err := os.OpenRoot(volumeRoot)
+	currentRoot, err := operations.openRoot(volumeRoot)
 	if err != nil {
-		return nil, fmt.Errorf("%w: anchor filesystem root: %w", ErrEvidenceUnsafePath, err)
+		return nil, evidenceIO("anchor filesystem root", err)
 	}
 	currentPath := volumeRoot
 	for _, component := range components {
 		currentPath = filepath.Join(currentPath, component)
-		info, lstatErr := currentRoot.Lstat(component)
+		info, lstatErr := operations.lstat(currentRoot, component)
 		if lstatErr != nil {
-			_ = currentRoot.Close()
-			return nil, fmt.Errorf("%w: inspect directory %s: %w", ErrEvidenceUnsafePath, currentPath, lstatErr)
+			if errors.Is(lstatErr, fs.ErrNotExist) {
+				return nil, closeEvidenceRoots(fmt.Errorf("%w: directory %s disappeared", ErrEvidenceUnsafePath, currentPath), operations, currentRoot)
+			}
+			return nil, closeEvidenceRoots(evidenceIO("inspect directory "+currentPath, lstatErr), operations, currentRoot)
 		}
 		if info.Mode()&fs.ModeSymlink != 0 || !info.IsDir() {
-			_ = currentRoot.Close()
-			return nil, fmt.Errorf("%w: component %s is not a real directory", ErrEvidenceUnsafePath, currentPath)
+			return nil, closeEvidenceRoots(fmt.Errorf("%w: component %s is not a real directory", ErrEvidenceUnsafePath, currentPath), operations, currentRoot)
 		}
-		childRoot, openErr := currentRoot.OpenRoot(component)
+		childRoot, openErr := operations.openChild(currentRoot, component)
 		if openErr != nil {
-			_ = currentRoot.Close()
-			return nil, fmt.Errorf("%w: anchor directory %s: %w", ErrEvidenceUnsafePath, currentPath, openErr)
+			classified := classifyAnchorOpenFailure(currentRoot, component, currentPath, info, openErr, operations)
+			return nil, closeEvidenceRoots(classified, operations, currentRoot)
 		}
-		if verifyErr := verifyAnchoredChild(currentRoot, childRoot, component, info); verifyErr != nil {
-			_ = childRoot.Close()
-			_ = currentRoot.Close()
-			return nil, fmt.Errorf("%w: directory component %s changed while anchoring: %v", ErrEvidenceUnsafePath, currentPath, verifyErr)
+		if verifyErr := verifyAnchoredChildWithOperations(currentRoot, childRoot, component, currentPath, info, operations); verifyErr != nil {
+			return nil, closeEvidenceRoots(verifyErr, operations, childRoot, currentRoot)
 		}
-		if closeErr := currentRoot.Close(); closeErr != nil {
-			_ = childRoot.Close()
-			return nil, fmt.Errorf("%w: close parent anchor for %s: %w", ErrEvidenceUnsafePath, currentPath, closeErr)
+		if closeErr := operations.closeRoot(currentRoot); closeErr != nil {
+			return nil, closeEvidenceRoots(evidenceIO("close parent anchor for "+currentPath, closeErr), operations, childRoot)
 		}
 		currentRoot = childRoot
 	}
@@ -629,26 +709,59 @@ func openRealDirectory(path string) (*os.Root, error) {
 }
 
 func verifyAnchoredChild(parent, child *os.Root, name string, expected fs.FileInfo) error {
-	opened, err := child.Open(".")
+	return verifyAnchoredChildWithOperations(parent, child, name, name, expected, defaultEvidenceAnchorOperations())
+}
+
+func verifyAnchoredChildWithOperations(parent, child *os.Root, name, path string, expected fs.FileInfo, operations evidenceAnchorOperations) error {
+	operations = operations.withDefaults()
+	opened, err := operations.openDirectory(child)
 	if err != nil {
-		return err
+		return classifyAnchorOpenFailure(parent, name, path, expected, err, operations)
 	}
-	openedInfo, infoErr := opened.Stat()
-	closeErr := opened.Close()
-	current, currentErr := parent.Lstat(name)
-	if infoErr != nil {
-		return infoErr
+	openedInfo, infoErr := operations.statFile(opened)
+	closeErr := operations.closeFile(opened)
+	if infoErr != nil || closeErr != nil {
+		return evidenceIO("inspect anchored directory "+path, errors.Join(infoErr, closeErr))
 	}
-	if closeErr != nil {
-		return closeErr
-	}
+	current, currentErr := operations.lstat(parent, name)
 	if currentErr != nil {
-		return currentErr
+		if errors.Is(currentErr, fs.ErrNotExist) {
+			return fmt.Errorf("%w: directory component %s disappeared while anchoring", ErrEvidenceUnsafePath, path)
+		}
+		return evidenceIO("re-inspect directory "+path, currentErr)
 	}
 	if current.Mode()&fs.ModeSymlink != 0 || !current.IsDir() || !openedInfo.IsDir() || !os.SameFile(expected, current) || !os.SameFile(expected, openedInfo) {
-		return errors.New("directory identity changed")
+		return fmt.Errorf("%w: directory component %s changed while anchoring", ErrEvidenceUnsafePath, path)
 	}
 	return nil
+}
+
+func classifyAnchorOpenFailure(parent *os.Root, name, path string, expected fs.FileInfo, openErr error, operations evidenceAnchorOperations) error {
+	current, currentErr := operations.lstat(parent, name)
+	if currentErr != nil {
+		if errors.Is(currentErr, fs.ErrNotExist) {
+			return fmt.Errorf("%w: directory %s disappeared while opening: %w", ErrEvidenceUnsafePath, path, openErr)
+		}
+		return evidenceIO("open and re-inspect directory "+path, errors.Join(openErr, currentErr))
+	}
+	if current.Mode()&fs.ModeSymlink != 0 || !current.IsDir() || !os.SameFile(expected, current) {
+		return fmt.Errorf("%w: directory %s changed while opening: %w", ErrEvidenceUnsafePath, path, openErr)
+	}
+	return evidenceIO("open directory "+path, openErr)
+}
+
+func closeEvidenceRoots(primary error, operations evidenceAnchorOperations, roots ...*os.Root) error {
+	operations = operations.withDefaults()
+	causes := []error{primary}
+	for _, root := range roots {
+		if root == nil {
+			continue
+		}
+		if closeErr := operations.closeRoot(root); closeErr != nil {
+			causes = append(causes, evidenceIO("close directory anchor during cleanup", closeErr))
+		}
+	}
+	return errors.Join(causes...)
 }
 
 func absolutePathComponents(path string) ([]string, string, error) {
