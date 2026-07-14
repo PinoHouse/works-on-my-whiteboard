@@ -1,0 +1,59 @@
+schema_version: 1
+id: distributed-rate-limiter
+kind: scenario
+required: true
+status: complete
+implementations:
+  - shared-token-bucket
+  - per-node-token-bucket
+  - shared-fail-closed
+  - shared-fail-open
+case_bindings:
+  - id: distributed-rate-limiter-global-quota
+    case_id: distributed-rate-limiter
+    claim: distributed-rate-limiter-per-node-multiplies-global-quota
+    workload: two-node-burst
+    assertions:
+      - all-requests-decided
+      - expected-allowed-count
+      - expected-global-quota-overshoot
+      - no-unexpected-errors
+  - id: distributed-rate-limiter-outage-policy
+    case_id: distributed-rate-limiter
+    claim: distributed-rate-limiter-outage-policy-trades-availability-for-quota
+    workload: coordinator-outage
+    assertions:
+      - all-requests-decided
+      - expected-outage-decision
+      - expected-outage-availability
+      - expected-quota-overshoot
+      - no-unexpected-errors
+required_runs:
+  - id: per-node-vs-shared-quota
+    binding: distributed-rate-limiter-global-quota
+    baseline: shared-token-bucket
+    variants:
+      - per-node-token-bucket
+    workload: two-node-burst
+    faults: []
+  - id: coordinator-outage-policy
+    binding: distributed-rate-limiter-outage-policy
+    baseline: shared-fail-closed
+    variants:
+      - shared-fail-open
+    workload: coordinator-outage
+    faults:
+      - coordinator-unavailable
+metrics:
+  - requests.total
+  - requests.allowed
+  - requests.denied
+  - requests.outage
+  - requests.outage_allowed
+  - requests.outage_denied
+  - requests.degraded
+  - decisions.errors
+  - quota.nominal_limit
+  - quota.overshoot
+sources:
+  - source-rfc-3290-token-bucket

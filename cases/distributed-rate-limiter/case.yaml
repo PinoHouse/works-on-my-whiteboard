@@ -1,0 +1,35 @@
+schema_version: 1
+id: distributed-rate-limiter
+title: 分布式限流器
+primary_family: addressing-traffic
+required: true
+status: complete
+dimensions:
+  - problem-slo
+  - capacity-cost-skew
+  - contracts-data-invariants
+  - placement-routing-sharding
+  - consistency-ordering-time
+  - concurrency-transactions-idempotency
+  - cache-index-amplification
+  - async-backpressure-fairness
+  - failure-recovery-disaster
+  - observability-release-evolution
+  - security-privacy-multitenancy
+  - evidence-validation
+principles:
+  - token-bucket
+claims:
+  - id: distributed-rate-limiter-per-node-multiplies-global-quota
+    statement: 将完整租户配额独立复制到每个节点，会使全局可放行预算随节点数成倍增长。
+  - id: distributed-rate-limiter-outage-policy-trades-availability-for-quota
+    statement: 协调器不可用时，fail-open 与 fail-closed 在请求可用性和全局配额守恒之间作出相反取舍。
+labs:
+  - distributed-rate-limiter
+evidence_requirements:
+  - claim: distributed-rate-limiter-per-node-multiplies-global-quota
+    lab: distributed-rate-limiter
+  - claim: distributed-rate-limiter-outage-policy-trades-availability-for-quota
+    lab: distributed-rate-limiter
+sources:
+  - source-rfc-3290-token-bucket
