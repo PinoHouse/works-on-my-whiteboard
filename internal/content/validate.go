@@ -162,11 +162,3 @@ func sortContentDiagnostics(diagnostics []validator.Diagnostic) []validator.Diag
 	}
 	return unique
 }
-
-func appendReadDiagnostic(diagnostics []validator.Diagnostic, code, path, entityID string, _ error) []validator.Diagnostic {
-	message := "Markdown content cannot be read"
-	if code == CodeMissingContentFile {
-		message = "required Markdown content is missing"
-	}
-	return append(diagnostics, contentDiagnostic(code, path, entityID, message))
-}

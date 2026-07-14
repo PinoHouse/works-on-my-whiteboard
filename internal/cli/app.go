@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/PinoHouse/works-on-my-whiteboard/internal/validator"
@@ -24,19 +25,63 @@ func Run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	trackedStdout := &trackingWriter{destination: stdout}
+	trackedStderr := &trackingWriter{destination: stderr}
+	exitCode := ExitArgumentOrLoadFailure
 	if len(args) == 0 {
-		_, _ = fmt.Fprintln(stderr, "usage: whiteboard <validate|coverage>")
+		writeCLIError(trackedStderr, "usage: whiteboard <validate|coverage>")
+	} else {
+		switch args[0] {
+		case "validate":
+			exitCode = runValidate(ctx, args[1:], trackedStdout, trackedStderr)
+		case "coverage":
+			exitCode = runCoverage(ctx, args[1:], trackedStdout, trackedStderr)
+		default:
+			writeCLIError(trackedStderr, "unknown command %q; want validate or coverage", args[0])
+		}
+	}
+	if trackedStdout.Err() != nil || trackedStderr.Err() != nil {
 		return ExitArgumentOrLoadFailure
 	}
-	switch args[0] {
-	case "validate":
-		return runValidate(ctx, args[1:], stdout, stderr)
-	case "coverage":
-		return runCoverage(ctx, args[1:], stdout, stderr)
-	default:
-		_, _ = fmt.Fprintf(stderr, "unknown command %q; want validate or coverage\n", args[0])
-		return ExitArgumentOrLoadFailure
+	return exitCode
+}
+
+type trackingWriter struct {
+	destination io.Writer
+	err         error
+}
+
+func (writer *trackingWriter) Write(value []byte) (int, error) {
+	if writer.err != nil {
+		return 0, writer.err
 	}
+	if writer.destination == nil {
+		writer.err = errors.New("nil writer")
+		return 0, writer.err
+	}
+	written, err := writer.destination.Write(value)
+	if err == nil && written != len(value) {
+		err = io.ErrShortWrite
+	}
+	if err != nil {
+		writer.err = err
+	}
+	return written, err
+}
+
+func (writer *trackingWriter) Err() error {
+	return writer.err
+}
+
+func writeFull(writer io.Writer, value []byte) error {
+	written, err := writer.Write(value)
+	if err != nil {
+		return err
+	}
+	if written != len(value) {
+		return io.ErrShortWrite
+	}
+	return nil
 }
 
 func newFlagSet(command string, stderr io.Writer) *flag.FlagSet {
@@ -99,24 +144,24 @@ func sortDiagnostics(diagnostics []validator.Diagnostic) []validator.Diagnostic 
 
 func writeDiagnostics(writer io.Writer, diagnostics []validator.Diagnostic) error {
 	for _, diagnostic := range diagnostics {
-		if _, err := fmt.Fprintf(writer, "%s [%s]", diagnostic.Severity, diagnostic.Code); err != nil {
-			return err
-		}
+		var line strings.Builder
+		fmt.Fprintf(&line, "%s [%s]", diagnostic.Severity, diagnostic.Code)
 		if diagnostic.Path != "" {
-			if _, err := fmt.Fprintf(writer, " path=%s", diagnostic.Path); err != nil {
-				return err
-			}
+			fmt.Fprintf(&line, " path=%s", quoteDiagnosticField(diagnostic.Path))
 		}
 		if diagnostic.EntityID != "" {
-			if _, err := fmt.Fprintf(writer, " entity=%s", diagnostic.EntityID); err != nil {
-				return err
-			}
+			fmt.Fprintf(&line, " entity=%s", quoteDiagnosticField(diagnostic.EntityID))
 		}
-		if _, err := fmt.Fprintf(writer, ": %s\n", diagnostic.Message); err != nil {
+		fmt.Fprintf(&line, ": %s\n", quoteDiagnosticField(diagnostic.Message))
+		if err := writeFull(writer, []byte(line.String())); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func quoteDiagnosticField(value string) string {
+	return strconv.Quote(value)
 }
 
 func writeCLIError(stderr io.Writer, format string, values ...any) {

@@ -58,14 +58,10 @@ func ValidateRepository(root string, repository *catalog.Catalog) Result {
 			if manifest.Status != catalog.LifecycleStatusComplete {
 				continue
 			}
-			relative := filepath.ToSlash(filepath.Join("cases", manifest.ID, "README.md"))
-			source, readErr := os.ReadFile(filepath.Join(rootAbsolute, filepath.FromSlash(relative)))
-			if readErr != nil {
-				code := CodeContentReadFailure
-				if os.IsNotExist(readErr) {
-					code = CodeMissingContentFile
-				}
-				diagnostics = appendReadDiagnostic(diagnostics, code, relative, manifest.ID, readErr)
+			relative := canonicalMarkdownRelativePath("cases", manifest.ID)
+			source, readDiagnostics := readCanonicalMarkdown(rootAbsolute, rootReal, "cases", manifest.ID)
+			diagnostics = append(diagnostics, readDiagnostics...)
+			if len(readDiagnostics) != 0 {
 				continue
 			}
 			diagnostics = append(diagnostics, ValidateCase(relative, source, manifest, repository).Diagnostics...)
@@ -75,14 +71,10 @@ func ValidateRepository(root string, repository *catalog.Catalog) Result {
 			if manifest.Status != catalog.LifecycleStatusComplete {
 				continue
 			}
-			relative := filepath.ToSlash(filepath.Join("principles", manifest.ID, "README.md"))
-			source, readErr := os.ReadFile(filepath.Join(rootAbsolute, filepath.FromSlash(relative)))
-			if readErr != nil {
-				code := CodeContentReadFailure
-				if os.IsNotExist(readErr) {
-					code = CodeMissingContentFile
-				}
-				diagnostics = appendReadDiagnostic(diagnostics, code, relative, manifest.ID, readErr)
+			relative := canonicalMarkdownRelativePath("principles", manifest.ID)
+			source, readDiagnostics := readCanonicalMarkdown(rootAbsolute, rootReal, "principles", manifest.ID)
+			diagnostics = append(diagnostics, readDiagnostics...)
+			if len(readDiagnostics) != 0 {
 				continue
 			}
 			diagnostics = append(diagnostics, ValidatePrinciple(relative, source, manifest, repository).Diagnostics...)
@@ -107,6 +99,134 @@ func ValidateRepository(root string, repository *catalog.Catalog) Result {
 		diagnostics = append(diagnostics, validateDocumentLinks(rootAbsolute, rootReal, document, cache)...)
 	}
 	return Result{Diagnostics: sortContentDiagnostics(diagnostics)}
+}
+
+func readCanonicalMarkdown(root, realRoot, directory, entityID string) ([]byte, []validator.Diagnostic) {
+	relative := canonicalMarkdownRelativePath(directory, entityID)
+	if !canonicalEntityPathComponent(entityID) {
+		return nil, []validator.Diagnostic{contentDiagnostic(
+			CodeContentReadFailure,
+			relative,
+			entityID,
+			"required Markdown content path is unsafe",
+		)}
+	}
+	target := filepath.Join(root, directory, entityID, "README.md")
+	if !pathWithinRoot(root, target) {
+		return nil, []validator.Diagnostic{contentDiagnostic(
+			CodeContentReadFailure,
+			relative,
+			entityID,
+			"required Markdown content path is unsafe",
+		)}
+	}
+	hasSymlink, symlinkErr := pathContainsSymlink(root, target)
+	if symlinkErr != nil {
+		return nil, []validator.Diagnostic{contentDiagnostic(
+			CodeContentReadFailure,
+			relative,
+			entityID,
+			"required Markdown content cannot be inspected",
+		)}
+	}
+	if hasSymlink {
+		return nil, []validator.Diagnostic{contentDiagnostic(
+			CodeContentReadFailure,
+			relative,
+			entityID,
+			"required Markdown content path contains a symlink",
+		)}
+	}
+	exists, exact, stateErr := exactPathState(root, target)
+	if stateErr != nil {
+		return nil, []validator.Diagnostic{contentDiagnostic(
+			CodeContentReadFailure,
+			relative,
+			entityID,
+			"required Markdown content cannot be inspected",
+		)}
+	}
+	if !exists || !exact {
+		return nil, []validator.Diagnostic{contentDiagnostic(
+			CodeMissingContentFile,
+			relative,
+			entityID,
+			"required Markdown content is missing",
+		)}
+	}
+	info, statErr := os.Lstat(target)
+	if statErr != nil {
+		code := CodeContentReadFailure
+		message := "required Markdown content cannot be inspected"
+		if os.IsNotExist(statErr) {
+			code = CodeMissingContentFile
+			message = "required Markdown content is missing"
+		}
+		return nil, []validator.Diagnostic{contentDiagnostic(code, relative, entityID, message)}
+	}
+	if !info.Mode().IsRegular() {
+		return nil, []validator.Diagnostic{contentDiagnostic(
+			CodeContentReadFailure,
+			relative,
+			entityID,
+			"required Markdown content is not a regular authored file",
+		)}
+	}
+	realTarget, resolveErr := filepath.EvalSymlinks(target)
+	if resolveErr != nil || !pathWithinRoot(realRoot, realTarget) {
+		return nil, []validator.Diagnostic{contentDiagnostic(
+			CodeContentReadFailure,
+			relative,
+			entityID,
+			"required Markdown content does not resolve inside the repository root",
+		)}
+	}
+	source, readErr := os.ReadFile(target)
+	if readErr != nil {
+		code := CodeContentReadFailure
+		message := "required Markdown content cannot be read"
+		if os.IsNotExist(readErr) {
+			code = CodeMissingContentFile
+			message = "required Markdown content is missing"
+		}
+		return nil, []validator.Diagnostic{contentDiagnostic(code, relative, entityID, message)}
+	}
+	return source, []validator.Diagnostic{}
+}
+
+func canonicalEntityPathComponent(entityID string) bool {
+	return entityID != "" && entityID != "." && entityID != ".." &&
+		!filepath.IsAbs(entityID) && !strings.ContainsAny(entityID, "/\\\x00") &&
+		filepath.Clean(entityID) == entityID
+}
+
+func canonicalMarkdownRelativePath(directory, entityID string) string {
+	return filepath.ToSlash(directory + "/" + entityID + "/README.md")
+}
+
+func pathContainsSymlink(root, target string) (bool, error) {
+	relative, err := filepath.Rel(root, target)
+	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return false, err
+	}
+	current := root
+	for _, component := range strings.Split(relative, string(filepath.Separator)) {
+		if component == "." || component == "" {
+			continue
+		}
+		current = filepath.Join(current, component)
+		info, statErr := os.Lstat(current)
+		if statErr != nil {
+			if os.IsNotExist(statErr) {
+				return false, nil
+			}
+			return false, statErr
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func discoverMarkdownDocuments(root string) ([]string, []validator.Diagnostic) {

@@ -134,20 +134,35 @@ func TestClaimCandidateDetectionIsReservedAndCaseInsensitive(t *testing.T) {
 		)
 		assertNoDiagnosticCode(t, result, "invalid_claim_marker")
 	})
+
+	t.Run("reserved_non_word_delimiters_are_malformed", func(t *testing.T) {
+		for _, raw := range []string{
+			"[MEASURED-fake-claim]",
+			"[SOURCED：fake-claim：source-one]",
+		} {
+			markers, malformed := scanClaimMarkers(raw)
+			if len(markers) != 0 || len(malformed) != 1 || malformed[0] != raw {
+				t.Fatalf("scanClaimMarkers(%q) markers=%#v malformed=%#v; want one malformed reserved marker", raw, markers, malformed)
+			}
+		}
+	})
 }
 
-func TestOrdinaryUnclosedBracketDoesNotHideLaterClaimMarker(t *testing.T) {
-	manifest := catalog.CaseManifest{
-		ID:     "case-one",
-		Status: catalog.LifecycleStatusComplete,
-		Claims: []catalog.Claim{{ID: "claim-one"}},
+func TestOrdinaryUnclosedBracketDoesNotHideLaterMalformedClaimMarker(t *testing.T) {
+	markers, malformed := scanClaimMarkers("[note [DEDUCED:claim-one")
+	if len(markers) != 0 || len(malformed) != 1 || malformed[0] != "[DEDUCED:claim-one" {
+		t.Fatalf("markers=%#v malformed=%#v; want nested unclosed reserved marker reported", markers, malformed)
 	}
-	markdown := validCaseMarkdown(map[string]string{
-		"表面题目": longProse(140) + " [note [DEDUCED:claim-one]",
-	})
-	result := ValidateCase("cases/case-one/README.md", markdown, manifest, emptyCatalog())
-	assertNoDiagnosticCode(t, result, "missing_claim_marker")
-	assertNoDiagnosticCode(t, result, "invalid_claim_marker")
+}
+
+func TestMalformedReservedMarkerDoesNotHideNestedValidClaimMarker(t *testing.T) {
+	markers, malformed := scanClaimMarkers("[DEDUCED:bad [DEDUCED:claim-one]")
+	if len(malformed) != 1 || malformed[0] != "[DEDUCED:bad [DEDUCED:claim-one]" {
+		t.Fatalf("malformed=%#v; want exactly one outer malformed marker", malformed)
+	}
+	if len(markers) != 1 || markers[0].class != claimClassDeduced || markers[0].claimID != "claim-one" {
+		t.Fatalf("markers=%#v; want nested valid DEDUCED claim", markers)
+	}
 }
 
 func TestValidateCaseAppliesRenderedTextSemanticsBeforeScanningMarkers(t *testing.T) {

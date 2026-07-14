@@ -3,7 +3,6 @@ package cli
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"strings"
 
@@ -92,12 +91,10 @@ func renderValidation(writer io.Writer, format string, report validator.Report) 
 			return err
 		}
 		encoded = append(encoded, '\n')
-		_, err = writer.Write(encoded)
-		return err
+		return writeFull(writer, encoded)
 	}
 	if len(report.Diagnostics) == 0 {
-		_, err := fmt.Fprintln(writer, "validation passed")
-		return err
+		return writeFull(writer, []byte("validation passed\n"))
 	}
 	return writeDiagnostics(writer, report.Diagnostics)
 }

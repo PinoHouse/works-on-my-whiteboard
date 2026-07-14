@@ -75,14 +75,14 @@ func runCoverage(ctx context.Context, args []string, stdout io.Writer, stderr io
 		return ExitSuccess
 	}
 	if !output.set {
-		if _, err := stdout.Write(rendered); err != nil {
+		if err := writeFull(stdout, rendered); err != nil {
 			writeCLIError(stderr, "write coverage result: %v", err)
 			return ExitArgumentOrLoadFailure
 		}
 		return ExitSuccess
 	}
 	if err := writeCoverageAtomically(output.value, rendered); err != nil {
-		writeCLIError(stderr, "write coverage output %q: %v", output.value, err)
+		writeCLIError(stderr, "write coverage output: %v", err)
 		return ExitArgumentOrLoadFailure
 	}
 	return ExitSuccess
@@ -173,7 +173,7 @@ func writeCoverageAtomically(path string, data []byte) error {
 	directory := filepath.Dir(path)
 	temporary, err := os.CreateTemp(directory, ".whiteboard-coverage-")
 	if err != nil {
-		return err
+		return atomicCoverageWriteError("create temporary file")
 	}
 	temporaryPath := temporary.Name()
 	closed := false
@@ -186,23 +186,28 @@ func writeCoverageAtomically(path string, data []byte) error {
 		}
 	}()
 	if err := temporary.Chmod(0o644); err != nil {
-		return err
+		return atomicCoverageWriteError("set temporary file permissions")
 	}
 	written, err := temporary.Write(data)
 	if err != nil {
-		return err
+		return atomicCoverageWriteError("write temporary file")
 	}
 	if written != len(data) {
-		return io.ErrShortWrite
+		return atomicCoverageWriteError("write temporary file")
 	}
 	if err := temporary.Close(); err != nil {
-		closed = true
-		return err
+		return atomicCoverageWriteError("close temporary file")
 	}
 	closed = true
 	if err := os.Rename(temporaryPath, path); err != nil {
-		return err
+		return atomicCoverageWriteError("replace destination")
 	}
 	temporaryPath = ""
 	return nil
+}
+
+type atomicCoverageWriteError string
+
+func (stage atomicCoverageWriteError) Error() string {
+	return "atomic write failed during " + string(stage)
 }

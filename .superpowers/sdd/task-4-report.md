@@ -199,8 +199,168 @@ all modules verified
 
 ## 独立复审
 
-独立只读 reviewer 的最终结论为 Approved：Critical / Important / Minor 均无。Reviewer 独立运行并通过 `go test ./...`、content/CLI race、`go vet ./...` 以及两条 CLI smoke；未修改或提交文件。
+独立 reviewer 的真实结论为不批准：Critical 0、Important 5、Minor 1。五项 Important 分别是 canonical README fail-open、atomic coverage 错误泄漏随机/绝对路径、未闭合 claim scanner fail-open、CLI writer failure 未统一映射 exit 2，以及 text diagnostic 的 CR/LF/ANSI 注入。Minor 是 reserved-token 非 word 边界与 malformed 重叠恢复不完整。Reviewer 未修改或提交文件；所有 finding 均进入下述追加修复循环。
 
 ## 风险与遗留
 
 唯一非代码限制是当前环境无法连接 Go proxy 下载一个上游测试依赖；现有 module cache 足以让本仓库 full/race/vet/CLI 全部通过，模块文件保持不变。除此之外无已知阻塞。
+
+## 独立复审追加修复循环
+
+首个 Task 4 commit `9be1251cf0162f1e96d3e339ccc38add4a4ceb0c` 之后，控制端独立复审给出 C0/I5/M1。修复保持 Task 4 范围，未修改 catalog/validator、规范、真实内容、harness 或 evidence；不 amend 首个 commit。
+
+### Fix 1：canonical complete README fail closed
+
+根因是 case/principle canonical README 在 lexical、case、symlink 和 file type 检查前直接调用 `os.ReadFile`。先增加共用 reader 的回归测试。
+
+RED：
+
+```text
+$ go test ./internal/content -run '^TestReadCanonicalMarkdownRejectsUnsafeAuthoredPaths$' -count=1
+exit 1
+internal/content/links_test.go:211:24: undefined: readCanonicalMarkdown
+internal/content/links_test.go:226:24: undefined: readCanonicalMarkdown
+internal/content/links_test.go:234:24: undefined: readCanonicalMarkdown
+internal/content/links_test.go:245:24: undefined: readCanonicalMarkdown
+```
+
+实现后进一步加入“仓库内中间目录 symlink”用例，证明只检查最终路径仍会读取 symlink 目标。
+
+```text
+$ go test ./internal/content -run '^TestReadCanonicalMarkdownRejectsUnsafeAuthoredPaths/internal_directory_symlink$' -count=1
+exit 1
+data=<outside canonical Markdown> diagnostics=[]; want intermediate symlink failure
+```
+
+GREEN：
+
+```text
+$ go test ./internal/content -run '^TestReadCanonicalMarkdownRejectsUnsafeAuthoredPaths$' -count=1
+exit 0
+ok github.com/PinoHouse/works-on-my-whiteboard/internal/content 0.972s
+```
+
+case/principle 现共用一个 canonical reader。它先拒绝非单路径组件和 lexical escape，再从 root 下逐组件 `Lstat`，在进入任何中间 symlink 前失败；之后校验 exact case、最终 regular file 和 real-root containment，最后才读取。回归覆盖 `../`、外部 symlink、内部目录 symlink、大小写不精确和 special file。
+
+### Fix 2：claim scanner fail-open 与 reserved-token 边界
+
+根因是 scanner 在首个无 `]` 的普通 `[` 处直接 `break`，并在 malformed 外层 marker 后跳到 `]` 之后，从而吞掉重叠的合法 marker。reserved-class 候选边界也只认 ASCII colon/space。
+
+RED：
+
+```text
+$ go test ./internal/content -run 'TestClaimCandidateDetectionIsReservedAndCaseInsensitive|TestOrdinaryUnclosedBracketDoesNotHideLaterMalformedClaimMarker|TestMalformedReservedMarkerDoesNotHideNestedValidClaimMarker' -count=1
+exit 1
+scanClaimMarkers("[MEASURED-fake-claim]") malformed=[]; want one malformed reserved marker
+scanClaimMarkers("[note [DEDUCED:claim-one") malformed=[]; want nested unclosed reserved marker
+scanClaimMarkers("[DEDUCED:bad [DEDUCED:claim-one]") markers=[]; want nested valid DEDUCED claim
+```
+
+GREEN：
+
+```text
+$ go test ./internal/content -run 'TestClaimCandidateDetectionIsReservedAndCaseInsensitive|TestOrdinaryUnclosedBracketDoesNotHideLaterMalformedClaimMarker|TestMalformedReservedMarkerDoesNotHideNestedValidClaimMarker' -count=1
+exit 0
+ok github.com/PinoHouse/works-on-my-whiteboard/internal/content 0.457s
+```
+
+scanner 在 ordinary/malformed 起点后一个 byte 恢复扫描，只在合法 marker 后跳过完整 marker。reserved token 后若继续 Unicode identifier word 才视为普通词，因此 `[DEDUCEDLY:note]` / `[ASSUMEDNESS]` 仍普通，而 `[MEASURED-fake-claim]` 与全角冒号形式均稳定报 malformed。排序阶段继续对完全相同诊断去重。
+
+### Fix 3：atomic coverage error 稳定化
+
+根因是 `CreateTemp` / `Chmod` / `Write` / `Close` / `Rename` 的平台错误被原样拼入 stderr，包含绝对路径和随机 `.whiteboard-coverage-*` 名称。
+
+RED：
+
+```text
+$ go test ./internal/cli -run '^TestCoverageCommandOutputRequiresExistingParentAndCleansTempOnFailure$' -count=1
+exit 1
+first stderr contains .whiteboard-coverage-3069797116
+second stderr contains .whiteboard-coverage-1603279915
+want byte-identical stable stage error
+```
+
+GREEN 包含在 Fix 4 的 focused 命令中。atomic writer 现在只返回固定阶段：create、chmod、write、close 或 replace；CLI 不再打印 output 绝对路径或底层平台错误。失败后仍关闭并移除 temp，rename 失败不会损坏旧目标。
+
+### Fix 4：所有 CLI writer failure 统一退出 2
+
+根因是 `fmt`/`flag` 写入、stdout、check 消息和若干诊断路径忽略 `(n < len, nil)` 或 writer error。先用同一组 short/error writer 覆盖 help、flag、validate/coverage stdout、diagnostics 以及 check missing/mismatch。
+
+RED：
+
+```text
+$ go test ./internal/cli -run 'TestRunMapsEveryAttemptedWriterFailureToExitTwo|TestTextDiagnosticsEscapeRepositoryControlledFields|TestCoverageCommandOutputRequiresExistingParentAndCleansTempOnFailure' -count=1
+exit 1
+short/help exit=0; want 2
+short/validate_stdout exit=0; want 2
+short/validate_diagnostics exit=3; want 2
+short/coverage_stdout exit=0; want 2
+short/coverage_diagnostics exit=3; want 2
+short/check_missing exit=3; want 2
+short/check_mismatch exit=3; want 2
+error/help exit=0; want 2
+error/check_missing exit=3; want 2
+error/check_mismatch exit=3; want 2
+```
+
+顶层 `Run` 现在把 stdout/stderr 包装为 tracking writer；任何 attempted write 的 short write 或 error 最终覆盖为 exit 2。完整 byte slice 输出统一经 `writeFull`，flag/help 内部即使忽略 error，顶层 tracker 仍保留失败。
+
+### Fix 5：text diagnostic 控制字符转义
+
+根因是 text renderer 直接插入仓库可控的 path/entity/message，使 CR、LF 与 ESC 可以制造物理行或终端控制序列。
+
+RED：
+
+```text
+text diagnostic contains injectable controls:
+"error [missing_link_target] path=bad\n\x1b[31merror [forged].md entity=entity\r..."
+```
+
+text renderer 现在按单条诊断构造一条物理行，并用 `strconv.Quote` 转义三个仓库字段；正常方括号保持可读，避免破坏 `missing_ids=[...]` 等既有文本。JSON 仍通过结构化字段保留原始值。真实含 LF/ESC 文件名回归确认 stderr 只有一条物理诊断行，且没有原始 CR/LF/ESC。
+
+Fix 3–5 focused GREEN：
+
+```text
+$ go test ./internal/cli -run 'TestRunMapsEveryAttemptedWriterFailureToExitTwo|TestTextDiagnosticsEscapeRepositoryControlledFields|TestCoverageCommandOutputRequiresExistingParentAndCleansTempOnFailure' -count=1
+exit 0
+ok github.com/PinoHouse/works-on-my-whiteboard/internal/cli 0.277s
+```
+
+### 修复后 fresh 验证
+
+```text
+$ go test ./internal/content -count=1
+exit 0
+ok github.com/PinoHouse/works-on-my-whiteboard/internal/content 0.366s
+
+$ go test ./internal/cli -count=1
+exit 0
+ok github.com/PinoHouse/works-on-my-whiteboard/internal/cli 0.559s
+
+$ go test ./... -count=1
+exit 0
+catalog 0.458s; cli 0.754s; content 1.034s; validator 1.414s
+
+$ go test -race ./... -count=1
+exit 0
+catalog 2.788s; cli 3.139s; content 3.780s; validator 4.005s
+
+$ go vet ./...
+exit 0（无输出）
+
+$ gofmt -d internal/content internal/cli cmd/whiteboard
+exit 0（无输出）
+
+$ git diff --check
+exit 0（无输出）
+
+$ go run ./cmd/whiteboard validate --root .
+exit 0
+validation passed
+
+$ go run ./cmd/whiteboard coverage --root . --format json
+exit 0
+baseline_total=75; complete_total=0; missing_case_ids=75
+```
+
+修复代码已完成 fresh 验证，当前状态为待独立 reviewer fresh rereview；本报告不提前声称 Approved。

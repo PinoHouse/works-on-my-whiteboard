@@ -138,9 +138,16 @@ func TestCoverageCommandOutputRequiresExistingParentAndCleansTempOnFailure(t *te
 	directory := t.TempDir()
 	targetDirectory := filepath.Join(directory, "coverage.md")
 	writeCLIFile(t, filepath.Join(targetDirectory, "sentinel"), "keep")
-	exitCode, _, _ = runCLI(context.Background(), []string{"coverage", "--root", root, "--output", targetDirectory})
-	if exitCode != 2 {
-		t.Fatalf("rename failure exit=%d; want 2", exitCode)
+	firstExit, firstStdout, firstStderr := runCLI(context.Background(), []string{"coverage", "--root", root, "--output", targetDirectory})
+	secondExit, secondStdout, secondStderr := runCLI(context.Background(), []string{"coverage", "--root", root, "--output", targetDirectory})
+	if firstExit != 2 || secondExit != 2 || firstStdout != "" || secondStdout != "" {
+		t.Fatalf("rename failures=(%d,%q)/(%d,%q); want exit 2 and empty stdout", firstExit, firstStdout, secondExit, secondStdout)
+	}
+	if firstStderr == "" || firstStderr != secondStderr {
+		t.Fatalf("rename stderr first=%q second=%q; want byte-identical stable stage error", firstStderr, secondStderr)
+	}
+	if strings.Contains(firstStderr, directory) || strings.Contains(firstStderr, ".whiteboard-coverage-") {
+		t.Fatalf("rename stderr leaks absolute/random temporary path: %q", firstStderr)
 	}
 	if data, err := os.ReadFile(filepath.Join(targetDirectory, "sentinel")); err != nil || string(data) != "keep" {
 		t.Fatalf("rename failure damaged old target: data=%q err=%v", data, err)

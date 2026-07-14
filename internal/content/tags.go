@@ -189,7 +189,8 @@ func scanClaimMarkers(text string) ([]claimMarker, []string) {
 			if beginsClaimMarker(tail) {
 				malformed = append(malformed, tail)
 			}
-			break
+			offset = start + 1
+			continue
 		}
 		end := start + 1 + endRelative
 		raw := text[start : end+1]
@@ -200,11 +201,11 @@ func scanClaimMarkers(text string) ([]claimMarker, []string) {
 		} else if claimLike {
 			malformed = append(malformed, raw)
 		}
-		if !ok && !claimLike {
+		if ok {
+			offset = end + 1
+		} else {
 			offset = start + 1
-			continue
 		}
-		offset = end + 1
 	}
 	return markers, malformed
 }
@@ -250,11 +251,15 @@ func reservedClaimCandidate(value string) bool {
 			return true
 		}
 		first, _ := utf8.DecodeRuneInString(suffix)
-		if first == ':' || unicode.IsSpace(first) {
+		if !identifierWordRune(first) {
 			return true
 		}
 	}
 	return false
+}
+
+func identifierWordRune(value rune) bool {
+	return value == '_' || unicode.IsLetter(value) || unicode.IsDigit(value) || unicode.IsMark(value)
 }
 
 func knownClaimClass(value string) (claimClass, bool) {

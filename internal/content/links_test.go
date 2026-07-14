@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/PinoHouse/works-on-my-whiteboard/internal/catalog"
+	"github.com/PinoHouse/works-on-my-whiteboard/internal/validator"
 )
 
 func TestValidateRepositoryChecksRelativeTargetsAndHeadingFragments(t *testing.T) {
@@ -195,6 +196,81 @@ func TestValidateRepositoryRequiresCanonicalReadmeOnlyForCompleteOwners(t *testi
 	if count != 1 {
 		t.Fatalf("diagnostics = %#v; want one missing complete README", result.Diagnostics)
 	}
+}
+
+func TestReadCanonicalMarkdownRejectsUnsafeAuthoredPaths(t *testing.T) {
+	root := t.TempDir()
+	rootReal, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("lexical_escape", func(t *testing.T) {
+		outside := t.TempDir()
+		writeTestFile(t, filepath.Join(outside, "README.md"), string(validCaseMarkdown(nil)))
+		data, diagnostics := readCanonicalMarkdown(root, rootReal, "cases", "../../"+filepath.Base(outside))
+		if len(data) != 0 || !diagnosticsContainCode(diagnostics, CodeContentReadFailure) {
+			t.Fatalf("data=%q diagnostics=%#v; want stable unsafe-path failure", data, diagnostics)
+		}
+	})
+
+	t.Run("external_directory_symlink", func(t *testing.T) {
+		outside := t.TempDir()
+		writeTestFile(t, filepath.Join(outside, "README.md"), string(validCaseMarkdown(nil)))
+		if err := os.MkdirAll(filepath.Join(root, "cases"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(outside, filepath.Join(root, "cases", "case-symlink")); err != nil {
+			t.Fatal(err)
+		}
+		data, diagnostics := readCanonicalMarkdown(root, rootReal, "cases", "case-symlink")
+		if len(data) != 0 || !diagnosticsContainCode(diagnostics, CodeContentReadFailure) {
+			t.Fatalf("data=%q diagnostics=%#v; want stable symlink failure", data, diagnostics)
+		}
+	})
+
+	t.Run("internal_directory_symlink", func(t *testing.T) {
+		authored := filepath.Join(root, "authored", "case-internal")
+		writeTestFile(t, filepath.Join(authored, "README.md"), string(validCaseMarkdown(nil)))
+		if err := os.MkdirAll(filepath.Join(root, "cases"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(authored, filepath.Join(root, "cases", "case-internal")); err != nil {
+			t.Fatal(err)
+		}
+		data, diagnostics := readCanonicalMarkdown(root, rootReal, "cases", "case-internal")
+		if len(data) != 0 || !diagnosticsContainCode(diagnostics, CodeContentReadFailure) {
+			t.Fatalf("data=%q diagnostics=%#v; want intermediate symlink failure", data, diagnostics)
+		}
+	})
+
+	t.Run("wrong_case", func(t *testing.T) {
+		writeTestFile(t, filepath.Join(root, "principles", "Principle-One", "README.md"), string(validPrincipleMarkdown(nil)))
+		data, diagnostics := readCanonicalMarkdown(root, rootReal, "principles", "principle-one")
+		if len(data) != 0 || !diagnosticsContainCode(diagnostics, CodeMissingContentFile) {
+			t.Fatalf("data=%q diagnostics=%#v; want exact-case missing-content failure", data, diagnostics)
+		}
+	})
+
+	t.Run("special_file", func(t *testing.T) {
+		canonical := filepath.Join(root, "cases", "special", "README.md")
+		if err := os.MkdirAll(canonical, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		data, diagnostics := readCanonicalMarkdown(root, rootReal, "cases", "special")
+		if len(data) != 0 || !diagnosticsContainCode(diagnostics, CodeContentReadFailure) {
+			t.Fatalf("data=%q diagnostics=%#v; want stable non-regular failure", data, diagnostics)
+		}
+	})
+}
+
+func diagnosticsContainCode(diagnostics []validator.Diagnostic, code string) bool {
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Code == code {
+			return true
+		}
+	}
+	return false
 }
 
 func TestValidateRepositoryRejectsSpecialFileTargets(t *testing.T) {
