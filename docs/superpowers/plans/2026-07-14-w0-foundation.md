@@ -930,21 +930,27 @@ type Fault struct {
 	Duration time.Duration
 }
 
+type MetricSpec struct {
+	ID   string
+	Unit string
+}
+
 type Definition struct {
-	Spec        harness.RunSpec
-	Profile     Profile
-	Hypothesis  string
-	Workload    Workload
-	Faults      []Fault
-	Limitations []string
-	Conclude    func(harness.RunResult) string
+	Spec         harness.RunSpec
+	Profile      Profile
+	Hypothesis   string
+	Workload     Workload
+	Faults       []Fault
+	Measurements []MetricSpec
+	Limitations  []string
+	Conclude     func(harness.RunResult) string
 }
 
 type Factory func(validator.MatrixCell, Profile) (Definition, error)
 func Lookup(validator.MatrixCell) (Factory, bool)
 ```
 
-Every factory sets the requested profile and validates that its generated `RunSpec` exactly matches the cell's six identity fields, workload, ordered faults, and assertion IDs. Smoke may use smaller numeric workload parameters but never a different workload/fault/assertion identity; deep parameters are the release contract. Task 9 converts `Definition` and `RunResult` to evidence, requires a non-empty falsifiable hypothesis, calls `Conclude` for both passed and failed outcomes, and preserves limitations and diagnostics.
+Every factory sets the requested profile and validates that its generated `RunSpec` exactly matches the cell's six identity fields, workload, ordered faults, and assertion IDs. `Measurements` declares the exact metric ID/unit contract for that definition and must agree with both its manifest and normalized run result; downstream evidence conversion must not infer units. Smoke may use smaller numeric workload parameters but never a different workload/fault/assertion identity; deep parameters are the release contract. Task 9 converts `Definition` and `RunResult` to evidence, requires a non-empty falsifiable hypothesis, calls `Conclude` for both passed and failed outcomes, and preserves limitations and diagnostics.
 
 - [ ] **Step 6: Author the complete manifest and Chinese case file**
 
