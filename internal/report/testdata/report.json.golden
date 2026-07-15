@@ -1,0 +1,108 @@
+{
+  "input_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "profile": "deep",
+  "coverage": {
+    "baseline_total": 3,
+    "complete_total": 1,
+    "missing_case_ids": [
+      "case-b",
+      "case-c"
+    ],
+    "unexpected_case_ids": [],
+    "families": [
+      {
+        "id": "coordination",
+        "required": 3,
+        "complete": 1
+      }
+    ],
+    "required_principles": [
+      "principle-a"
+    ],
+    "required_scenario_labs": [
+      "lab-a"
+    ],
+    "required_primitive_labs": [],
+    "required_adapters": []
+  },
+  "rows": [
+    {
+      "cell": {
+        "lab_id": "lab-a",
+        "required_run_id": "run-a",
+        "binding_id": "binding-a",
+        "claim_id": "claim-a",
+        "role": "baseline",
+        "implementation_id": "implementation-a",
+        "workload": "workload-a",
+        "faults": [
+          "fault-a"
+        ],
+        "assertion_ids": [
+          "assert-a"
+        ]
+      },
+      "evidence_id": "run-20260714T010203.004Z-00000000000000000000000000000001",
+      "status": "passed",
+      "workload": {
+        "id": "workload-a",
+        "parameters": {
+          "requests": 10,
+          "shards": 2
+        }
+      },
+      "faults": [
+        {
+          "id": "fault-a",
+          "at": 1,
+          "duration": 2
+        }
+      ],
+      "measurements": {
+        "latency.millis": {
+          "unit": "ms",
+          "value": 5
+        },
+        "requests.total": {
+          "unit": "requests",
+          "value": 10
+        }
+      },
+      "assertions": [
+        {
+          "id": "assert-a",
+          "passed": true,
+          "message": "a|b\nc\\slash"
+        }
+      ],
+      "environment": {
+        "go_version": "go1.26.5",
+        "os": "linux",
+        "arch": "amd64",
+        "cpu": "unknown",
+        "logical_cpus": 8
+      },
+      "conclusion": "Held | bounded\nwithout \\ drift.",
+      "limitations": [
+        "Synthetic | only.",
+        "No \\ hardware."
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "id": "source-a",
+      "title": "Source A",
+      "url": "https://example.com/source-a"
+    }
+  ],
+  "diagnostics": [
+    {
+      "code": "invalid_stable_id",
+      "severity": "error",
+      "path": "cases/a|b",
+      "entity_id": "case-a",
+      "message": "line one\nline two"
+    }
+  ]
+}

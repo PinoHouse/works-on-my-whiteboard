@@ -1,0 +1,66 @@
+{
+  "status": "changes",
+  "input_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "profile": "deep",
+  "rows": [
+    {
+      "cell": {
+        "lab_id": "lab-a",
+        "required_run_id": "run-a",
+        "binding_id": "binding-a",
+        "claim_id": "claim-a",
+        "role": "baseline",
+        "implementation_id": "implementation-a",
+        "workload": "workload-a",
+        "faults": [
+          "fault-a"
+        ],
+        "assertion_ids": [
+          "assert-a"
+        ]
+      },
+      "metric_changes": [
+        {
+          "id": "requests.total",
+          "left": {
+            "unit": "requests",
+            "value": 10
+          },
+          "right": {
+            "unit": "requests",
+            "value": 15
+          },
+          "delta": "5"
+        }
+      ],
+      "environment_changes": [
+        {
+          "field": "arch",
+          "left": "amd64",
+          "right": "arm64"
+        },
+        {
+          "field": "logical_cpus",
+          "left": "8",
+          "right": "10"
+        },
+        {
+          "field": "os",
+          "left": "linux",
+          "right": "darwin"
+        }
+      ],
+      "assertion_message_changes": [
+        {
+          "id": "assert-a",
+          "left": "left message",
+          "right": "right message"
+        }
+      ],
+      "conclusion": {
+        "left": "left conclusion",
+        "right": "right conclusion"
+      }
+    }
+  ]
+}

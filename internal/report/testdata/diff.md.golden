@@ -1,0 +1,11 @@
+# Evidence diff
+
+- Status: `changes`
+- Input digest: `sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`
+- Profile: `deep`
+
+## Changes
+
+| Cell | Metrics | Environment | Assertion messages | Conclusion | Limitations |
+| --- | --- | --- | --- | --- | --- |
+| lab-a/run-a/binding-a/claim-a/implementation-a/- | requests.total: 10 requests -> 15 requests (delta=5) | arch: amd64 -> arm64; logical_cpus: 8 -> 10; os: linux -> darwin | assert-a: left message -> right message | left conclusion -> right conclusion | none |

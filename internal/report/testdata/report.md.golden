@@ -1,0 +1,25 @@
+# Evidence report
+
+- Input digest: `sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`
+- Profile: `deep`
+- Coverage: complete=1 baseline=3 missing=2 unexpected=0
+- Missing case IDs: `case-b`, `case-c`
+- Unexpected case IDs: none
+
+## Required cells
+
+| Cell | Role | Evidence | Status | Workload | Faults | Measurements | Assertions | Environment | Conclusion | Limitations |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| lab-a/run-a/binding-a/claim-a/implementation-a/- | baseline | run-20260714T010203.004Z-00000000000000000000000000000001 | passed | workload-a {requests=10, shards=2} | fault-a@1ns+2ns | latency.millis=5 ms; requests.total=10 requests | assert-a=passed (a\|b<br>c\\slash) | go=go1.26.5 os=linux arch=amd64 cpu=unknown logical_cpus=8 | Held \| bounded<br>without \\ drift. | Synthetic \| only.; No \\ hardware. |
+
+## Sources
+
+| ID | Title | URL |
+| --- | --- | --- |
+| source-a | Source A | <https://example.com/source-a> |
+
+## Diagnostics
+
+| Code | Severity | Path | Entity | Message |
+| --- | --- | --- | --- | --- |
+| invalid_stable_id | error | cases/a\|b | case-a | line one<br>line two |
