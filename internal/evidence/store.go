@@ -42,6 +42,7 @@ type evidenceAnchorOperations struct {
 	lstat         func(*os.Root, string) (fs.FileInfo, error)
 	openChild     func(*os.Root, string) (*os.Root, error)
 	openDirectory func(*os.Root) (*os.File, error)
+	readDirectory func(*os.File) ([]fs.DirEntry, error)
 	statFile      func(*os.File) (fs.FileInfo, error)
 	closeFile     func(*os.File) error
 	closeRoot     func(*os.Root) error
@@ -58,6 +59,9 @@ func defaultEvidenceAnchorOperations() evidenceAnchorOperations {
 		},
 		openDirectory: func(root *os.Root) (*os.File, error) {
 			return root.Open(".")
+		},
+		readDirectory: func(directory *os.File) ([]fs.DirEntry, error) {
+			return directory.ReadDir(-1)
 		},
 		statFile: func(file *os.File) (fs.FileInfo, error) {
 			return file.Stat()
@@ -84,6 +88,9 @@ func (operations evidenceAnchorOperations) withDefaults() evidenceAnchorOperatio
 	}
 	if operations.openDirectory == nil {
 		operations.openDirectory = defaults.openDirectory
+	}
+	if operations.readDirectory == nil {
+		operations.readDirectory = defaults.readDirectory
 	}
 	if operations.statFile == nil {
 		operations.statFile = defaults.statFile
@@ -159,22 +166,16 @@ type Store struct {
 	root           string
 	runs           string
 	runsIdentity   fs.FileInfo
+	writable       bool
 	writeNoReplace immutableWriteFunc
 	readOps        evidenceReadOperations
 	anchorOps      evidenceAnchorOperations
 }
 
 func NewStore(root string) (*Store, error) {
-	if root == "" {
-		return nil, fmt.Errorf("%w: root is empty", ErrEvidenceInvalid)
-	}
-	absolute, err := filepath.Abs(root)
+	absolute, err := resolveEvidenceStoreRoot(root)
 	if err != nil {
-		return nil, fmt.Errorf("%w: resolve root: %w", ErrEvidenceInvalid, err)
-	}
-	absolute = filepath.Clean(absolute)
-	if absolute == filepath.VolumeName(absolute)+string(filepath.Separator) {
-		return nil, fmt.Errorf("%w: filesystem root cannot be an evidence root", ErrEvidenceUnsafePath)
+		return nil, err
 	}
 	if err := prepareRealDirectory(absolute); err != nil {
 		return nil, err
@@ -183,8 +184,39 @@ func NewStore(root string) (*Store, error) {
 	if err := prepareRealDirectory(runs); err != nil {
 		return nil, err
 	}
+	return openExistingStore(absolute, true, ErrEvidenceUnsafePath)
+}
+
+// OpenStoreReadOnly opens an existing evidence store without creating its root
+// or runs directory. Missing directory components are reported as
+// ErrEvidenceNotFound, while aliases and replacements remain unsafe.
+func OpenStoreReadOnly(root string) (*Store, error) {
+	absolute, err := resolveEvidenceStoreRoot(root)
+	if err != nil {
+		return nil, err
+	}
+	return openExistingStore(absolute, false, ErrEvidenceNotFound)
+}
+
+func resolveEvidenceStoreRoot(root string) (string, error) {
+	if root == "" {
+		return "", fmt.Errorf("%w: root is empty", ErrEvidenceInvalid)
+	}
+	absolute, err := filepath.Abs(root)
+	if err != nil {
+		return "", fmt.Errorf("%w: resolve root: %w", ErrEvidenceInvalid, err)
+	}
+	absolute = filepath.Clean(absolute)
+	if absolute == filepath.VolumeName(absolute)+string(filepath.Separator) {
+		return "", fmt.Errorf("%w: filesystem root cannot be an evidence root", ErrEvidenceUnsafePath)
+	}
+	return absolute, nil
+}
+
+func openExistingStore(absolute string, writable bool, missingCategory error) (*Store, error) {
+	runs := filepath.Join(absolute, "runs")
 	anchorOps := defaultEvidenceAnchorOperations()
-	runsRoot, err := openRealDirectoryWithOperations(runs, anchorOps)
+	runsRoot, err := openRealDirectoryWithMissingCategory(runs, anchorOps, missingCategory)
 	if err != nil {
 		return nil, err
 	}
@@ -197,6 +229,7 @@ func NewStore(root string) (*Store, error) {
 		root:         absolute,
 		runs:         runs,
 		runsIdentity: runsIdentity,
+		writable:     writable,
 		writeNoReplace: func(ctx context.Context, destination string, expected fs.FileInfo, data []byte) (immutablefile.Result, error) {
 			return immutablefile.WriteNoReplaceExpected(ctx, destination, expected, data)
 		},
@@ -224,6 +257,9 @@ func (store *Store) Put(ctx context.Context, record Record) error {
 	}
 	if store == nil || store.runs == "" || store.runsIdentity == nil {
 		return fmt.Errorf("%w: store is not initialized", ErrEvidenceUnsafePath)
+	}
+	if !store.writable {
+		return fmt.Errorf("%w: store is read-only", ErrEvidenceInvalid)
 	}
 	destination := filepath.Join(store.runs, record.ID+".json")
 	writeNoReplace := store.writeNoReplace
@@ -627,7 +663,11 @@ func prepareRealDirectory(path string) error {
 		return evidenceIO("anchor filesystem root", err)
 	}
 	currentPath := volumeRoot
-	for _, component := range components {
+	exactStart := len(components) - 2
+	if exactStart < 0 {
+		exactStart = 0
+	}
+	for index, component := range components {
 		currentPath = filepath.Join(currentPath, component)
 		info, lstatErr := operations.lstat(currentRoot, component)
 		if errors.Is(lstatErr, fs.ErrNotExist) {
@@ -642,6 +682,11 @@ func prepareRealDirectory(path string) error {
 				return closeEvidenceRoots(fmt.Errorf("%w: directory %s disappeared while preparing", ErrEvidenceUnsafePath, currentPath), operations, currentRoot)
 			}
 			return closeEvidenceRoots(evidenceIO("inspect directory "+currentPath, lstatErr), operations, currentRoot)
+		}
+		if index >= exactStart {
+			if exactErr := requireExactEvidenceEntryName(currentRoot, currentPath, component, operations); exactErr != nil {
+				return closeEvidenceRoots(exactErr, operations, currentRoot)
+			}
 		}
 		if info.Mode()&fs.ModeSymlink != 0 || !info.IsDir() {
 			return closeEvidenceRoots(fmt.Errorf("%w: component %s is not a real directory", ErrEvidenceUnsafePath, currentPath), operations, currentRoot)
@@ -670,6 +715,10 @@ func openRealDirectory(path string) (*os.Root, error) {
 }
 
 func openRealDirectoryWithOperations(path string, operations evidenceAnchorOperations) (*os.Root, error) {
+	return openRealDirectoryWithMissingCategory(path, operations, ErrEvidenceUnsafePath)
+}
+
+func openRealDirectoryWithMissingCategory(path string, operations evidenceAnchorOperations, missingCategory error) (*os.Root, error) {
 	operations = operations.withDefaults()
 	components, volumeRoot, err := absolutePathComponents(path)
 	if err != nil {
@@ -680,14 +729,23 @@ func openRealDirectoryWithOperations(path string, operations evidenceAnchorOpera
 		return nil, evidenceIO("anchor filesystem root", err)
 	}
 	currentPath := volumeRoot
-	for _, component := range components {
+	exactStart := len(components) - 2
+	if exactStart < 0 {
+		exactStart = 0
+	}
+	for index, component := range components {
 		currentPath = filepath.Join(currentPath, component)
 		info, lstatErr := operations.lstat(currentRoot, component)
 		if lstatErr != nil {
 			if errors.Is(lstatErr, fs.ErrNotExist) {
-				return nil, closeEvidenceRoots(fmt.Errorf("%w: directory %s disappeared", ErrEvidenceUnsafePath, currentPath), operations, currentRoot)
+				return nil, closeEvidenceRoots(fmt.Errorf("%w: directory %s is missing: %w", missingCategory, currentPath, lstatErr), operations, currentRoot)
 			}
 			return nil, closeEvidenceRoots(evidenceIO("inspect directory "+currentPath, lstatErr), operations, currentRoot)
+		}
+		if index >= exactStart {
+			if exactErr := requireExactEvidenceEntryName(currentRoot, currentPath, component, operations); exactErr != nil {
+				return nil, closeEvidenceRoots(exactErr, operations, currentRoot)
+			}
 		}
 		if info.Mode()&fs.ModeSymlink != 0 || !info.IsDir() {
 			return nil, closeEvidenceRoots(fmt.Errorf("%w: component %s is not a real directory", ErrEvidenceUnsafePath, currentPath), operations, currentRoot)
@@ -699,6 +757,11 @@ func openRealDirectoryWithOperations(path string, operations evidenceAnchorOpera
 		}
 		if verifyErr := verifyAnchoredChildWithOperations(currentRoot, childRoot, component, currentPath, info, operations); verifyErr != nil {
 			return nil, closeEvidenceRoots(verifyErr, operations, childRoot, currentRoot)
+		}
+		if index >= exactStart {
+			if exactErr := requireExactEvidenceEntryName(currentRoot, currentPath, component, operations); exactErr != nil {
+				return nil, closeEvidenceRoots(exactErr, operations, childRoot, currentRoot)
+			}
 		}
 		if closeErr := operations.closeRoot(currentRoot); closeErr != nil {
 			return nil, closeEvidenceRoots(evidenceIO("close parent anchor for "+currentPath, closeErr), operations, childRoot)
@@ -734,6 +797,25 @@ func verifyAnchoredChildWithOperations(parent, child *os.Root, name, path string
 		return fmt.Errorf("%w: directory component %s changed while anchoring", ErrEvidenceUnsafePath, path)
 	}
 	return nil
+}
+
+func requireExactEvidenceEntryName(parent *os.Root, path, expected string, operations evidenceAnchorOperations) error {
+	operations = operations.withDefaults()
+	directory, err := operations.openDirectory(parent)
+	if err != nil {
+		return evidenceIO("open parent directory for exact entry "+path, err)
+	}
+	entries, readErr := operations.readDirectory(directory)
+	closeErr := operations.closeFile(directory)
+	if readErr != nil || closeErr != nil {
+		return evidenceIO("enumerate parent directory for exact entry "+path, errors.Join(readErr, closeErr))
+	}
+	for _, entry := range entries {
+		if entry.Name() == expected {
+			return nil
+		}
+	}
+	return fmt.Errorf("%w: directory path %s has no exact entry named %q", ErrEvidenceUnsafePath, path, expected)
 }
 
 func classifyAnchorOpenFailure(parent *os.Root, name, path string, expected fs.FileInfo, openErr error, operations evidenceAnchorOperations) error {

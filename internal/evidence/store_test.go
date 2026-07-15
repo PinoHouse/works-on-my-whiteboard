@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -495,6 +496,98 @@ func TestNewStoreRejectsUnsafeDirectoryComponents(t *testing.T) {
 	}
 	if _, err := NewStore(rootWithAlias); !errors.Is(err, ErrEvidenceUnsafePath) {
 		t.Fatalf("symlink runs error = %v", err)
+	}
+}
+
+func TestOpenStoreReadOnlyNeverCreatesMissingRootOrRuns(t *testing.T) {
+	parent := safeEvidenceTempDir(t)
+	tests := []struct {
+		name        string
+		prepareRoot bool
+	}{
+		{name: "missing root"},
+		{name: "missing runs", prepareRoot: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := filepath.Join(parent, strings.ReplaceAll(test.name, " ", "-"))
+			if test.prepareRoot {
+				if err := os.Mkdir(root, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := OpenStoreReadOnly(root); !errors.Is(err, ErrEvidenceNotFound) {
+				t.Fatalf("OpenStoreReadOnly error = %v, want ErrEvidenceNotFound", err)
+			}
+			if _, err := os.Lstat(filepath.Join(root, "runs")); !errors.Is(err, fs.ErrNotExist) {
+				t.Fatalf("read-only open created runs: %v", err)
+			}
+			if !test.prepareRoot {
+				if _, err := os.Lstat(root); !errors.Is(err, fs.ErrNotExist) {
+					t.Fatalf("read-only open created root: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestOpenStoreReadOnlyReadsExistingRecordsButRejectsPut(t *testing.T) {
+	writable := newTestStore(t)
+	record := sealedRecordWithEntropy(t, 1)
+	if err := writable.Put(context.Background(), record); err != nil {
+		t.Fatal(err)
+	}
+	readOnly, err := OpenStoreReadOnly(writable.root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := readOnly.Get(context.Background(), record.ID)
+	if err != nil || loaded.ID != record.ID {
+		t.Fatalf("read-only Get = (%#v, %v)", loaded, err)
+	}
+	if err := readOnly.Put(context.Background(), sealedRecordWithEntropy(t, 2)); !errors.Is(err, ErrEvidenceInvalid) {
+		t.Fatalf("read-only Put error = %v, want ErrEvidenceInvalid", err)
+	}
+}
+
+func TestStoreOpenRejectsCaseAliasedRootAndRunsEntries(t *testing.T) {
+	tests := []struct {
+		name          string
+		canonicalRoot func(string) string
+		actualRuns    func(string) string
+	}{
+		{
+			name:          "evidence root",
+			canonicalRoot: func(parent string) string { return filepath.Join(parent, "evidence") },
+			actualRuns:    func(parent string) string { return filepath.Join(parent, "EVIDENCE", "runs") },
+		},
+		{
+			name:          "runs directory",
+			canonicalRoot: func(parent string) string { return filepath.Join(parent, "evidence") },
+			actualRuns:    func(parent string) string { return filepath.Join(parent, "evidence", "RUNS") },
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			parent := safeEvidenceTempDir(t)
+			canonicalRoot := test.canonicalRoot(parent)
+			if err := os.MkdirAll(test.actualRuns(parent), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := os.Lstat(filepath.Join(canonicalRoot, "runs")); errors.Is(err, fs.ErrNotExist) {
+				t.Skip("filesystem treats case variants as distinct entries")
+			} else if err != nil {
+				t.Fatalf("Lstat canonical alias: %v", err)
+			}
+			for name, open := range map[string]func(string) (*Store, error){
+				"writable":  NewStore,
+				"read-only": OpenStoreReadOnly,
+			} {
+				if _, err := open(canonicalRoot); !errors.Is(err, ErrEvidenceUnsafePath) {
+					t.Fatalf("%s open error = %v, want ErrEvidenceUnsafePath", name, err)
+				}
+			}
+		})
 	}
 }
 
