@@ -1,0 +1,59 @@
+schema_version: 1
+input_digest: sha256:e01f326eafa07c6f8f8c5b731d2487e55833bc2242f867e2c78a50660ddb21f6
+profile: deep
+run_set_id: set-20260715T045716.498Z-3df6a860ade345aa659f93eadea1dbe4
+selections:
+  - role: baseline
+    lab_id: distributed-rate-limiter
+    required_run_id: coordinator-outage-policy
+    binding_id: distributed-rate-limiter-outage-policy
+    claim_id: distributed-rate-limiter-outage-policy-trades-availability-for-quota
+    implementation_id: shared-fail-closed
+    adapter_id: ""
+    evidence_id: run-20260715T045716.499Z-8fc6c4b5d034650a1cfcc7e43cea008e
+    content_digest: sha256:5c7982491b480cd06a508938678bbe87edcb374f75bc947e19af4e13c1eeb009
+  - role: variant
+    lab_id: distributed-rate-limiter
+    required_run_id: coordinator-outage-policy
+    binding_id: distributed-rate-limiter-outage-policy
+    claim_id: distributed-rate-limiter-outage-policy-trades-availability-for-quota
+    implementation_id: shared-fail-open
+    adapter_id: ""
+    evidence_id: run-20260715T045716.518Z-410223e7a63526734ebebda49c071839
+    content_digest: sha256:e9e6eaeaff4f33b98657cb2e921a5137467a4d54c9975a39a9679c7424db9491
+  - role: variant
+    lab_id: distributed-rate-limiter
+    required_run_id: per-node-vs-shared-quota
+    binding_id: distributed-rate-limiter-global-quota
+    claim_id: distributed-rate-limiter-per-node-multiplies-global-quota
+    implementation_id: per-node-token-bucket
+    adapter_id: ""
+    evidence_id: run-20260715T045716.533Z-dbc712add6919bf4a9b6a4b2d57a03e0
+    content_digest: sha256:0534871abc9ea13f4f88cc30cd0e65b4f8f73d84206f08095ecb8330ade7548c
+  - role: baseline
+    lab_id: distributed-rate-limiter
+    required_run_id: per-node-vs-shared-quota
+    binding_id: distributed-rate-limiter-global-quota
+    claim_id: distributed-rate-limiter-per-node-multiplies-global-quota
+    implementation_id: shared-token-bucket
+    adapter_id: ""
+    evidence_id: run-20260715T045716.547Z-d7d5c501509003d2d12cb1d4845c30d1
+    content_digest: sha256:df21252168dd1543c9d6f9ba88215b529a950389eb5f6a6e33364d93cd4ccd17
+  - role: variant
+    lab_id: token-bucket
+    required_run_id: burst-and-refill-boundary
+    binding_id: token-bucket-burst-boundary
+    claim_id: token-bucket-bounds-burst-and-average-rate
+    implementation_id: token-bucket
+    adapter_id: ""
+    evidence_id: run-20260715T045716.560Z-f61ce939433086bd4eb2ca1a7bb38daa
+    content_digest: sha256:4e310746f7e804a7f67a39a6473d0a39fcf85960d7335efe8502e1e330a05403
+  - role: baseline
+    lab_id: token-bucket
+    required_run_id: burst-and-refill-boundary
+    binding_id: token-bucket-burst-boundary
+    claim_id: token-bucket-bounds-burst-and-average-rate
+    implementation_id: token-bucket-reference-model
+    adapter_id: ""
+    evidence_id: run-20260715T045716.577Z-a5a746043e2b665a445fcad99b5930d2
+    content_digest: sha256:4d363ece1bffcf6de01c8888cb88ccc93ac1979dbcceb3cd5cdecf846b167340
