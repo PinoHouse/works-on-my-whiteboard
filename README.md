@@ -1,33 +1,70 @@
 # Works on My Whiteboard
 
-Works on My Whiteboard 是一套从第一性原理推导系统设计的开源知识库。它不背诵品牌架构，也不把单一公司的实现当作通用答案；每个案例都从目标、SLO、约束、数据不变量与失败模式出发，再推导容量、分片、一致性、并发、缓存、异步处理和恢复策略。
+“Works on My Whiteboard” 玩的是 “Works on My Machine” 的梗：系统设计题很容易在白板上看起来什么都能跑，但图上的箭头并不能证明容量、并发、不变量和故障恢复真的成立。这个仓库把面试中的系统设计题还原为可以追问、推导、执行和证伪的工程问题。
 
-## 范围契约
+## 从第一性原理出发
 
-仓库冻结了 10 个问题族和 75 个规范案例。`scope.yaml` 是范围与主问题族映射的唯一机器可读契约；品牌化题目只作为排除项指向相应的规范目标模型。`aliases.yaml` 仅保留给未来规范 ID 重命名，不承载品牌映射。`sources.yaml` 记录用于交叉核对题型覆盖和工程维度的公开来源基线。
+这里不背品牌架构，也不把某家公司的历史实现当作标准答案。每个案例沿同一条推导链展开：
 
-## 证据状态
+1. 明确目标、SLO、流量模型、数据边界与不讨论的范围；
+2. 写出必须守住的不变量，以及允许牺牲的属性；
+3. 从容量、分片、一致性、并发、缓存、异步、背压和失败模式推导设计；
+4. 把关键分歧改写成可证伪的 `ASSUMED`、`DEDUCED`、`MEASURED` 或 `SOURCED` 主张；
+5. 用固定输入的实验、不可变证据和明确局限检验结论。
 
-每条主张使用以下且仅以下分类：
+问题的客观本质不是“能不能背出一张架构图”，而是能否在约束冲突时识别不变量、做出可解释取舍，并说明结论的证据边界。
 
-- `ASSUMED`：显式给出的前提、边界或工作假设。
-- `DEDUCED`：由已声明前提和不变量推导出的结论。
-- `MEASURED`：由可复现实验或测量数据支持的结论。
-- `SOURCED`：由可定位的外部来源直接支持的结论。
+## 范围与当前完成度
 
-实验运行状态独立记录为：
+[`scope.yaml`](scope.yaml) 冻结了 10 个问题族、75 个规范案例；这 **75 个规范案例全部属于项目范围**。品牌化题目只作为排除项映射到规范问题，不能制造新的“同义完成”。
 
-- `passed`：运行满足预先声明的判定条件。
-- `failed`：运行未满足判定条件。
-- `skipped`：运行因显式条件未执行。
-- `flaky`：重复运行得到不稳定结果。
-- `inconclusive`：现有结果不足以作出判定。
+W0 不是 v1.0，也不是 75 题的完整答案集。当前只有 `distributed-rate-limiter` 一个纵向案例满足内容、原则、实验与证据闭包，因此覆盖率严格为 **1/75**，其余 **74** 个案例仍然缺失。生成的 [`generated/coverage.md`](generated/coverage.md) 是该状态的机器生成视图，不能手工修饰。
 
-主张分类与运行状态是两条独立轴线；任何状态都不能替代来源定位、实验参数、原始输出和推导过程。
+## W0 的六个可执行单元格
 
-## W0 状态
+W0 对三个对照分别执行 baseline 与 variant；单元格由 lab、required run、binding、claim、implementation、adapter 六字段共同确定，role 另行记录。
 
-W0 只建立仓库、工具链和范围契约。正式发布所需的完整目录校验、证据闭包、实验矩阵、生成物一致性和 clean-checkout 验证尚未全部落地，因此 W0 的 release validation 有意保持不完整，当前仓库不满足正式 release 条件。
+| Lab / required run | Role | Binding | Claim | Implementation | Adapter | Workload / fault |
+| --- | --- | --- | --- | --- | --- | --- |
+| `token-bucket` / `burst-and-refill-boundary` | baseline | `token-bucket-burst-boundary` | `token-bucket-bounds-burst-and-average-rate` | `token-bucket-reference-model` | — | `burst-refill-boundary` / none |
+| `token-bucket` / `burst-and-refill-boundary` | variant | `token-bucket-burst-boundary` | `token-bucket-bounds-burst-and-average-rate` | `token-bucket` | — | `burst-refill-boundary` / none |
+| `distributed-rate-limiter` / `per-node-vs-shared-quota` | baseline | `distributed-rate-limiter-global-quota` | `distributed-rate-limiter-per-node-multiplies-global-quota` | `shared-token-bucket` | — | `two-node-burst` / none |
+| `distributed-rate-limiter` / `per-node-vs-shared-quota` | variant | `distributed-rate-limiter-global-quota` | `distributed-rate-limiter-per-node-multiplies-global-quota` | `per-node-token-bucket` | — | `two-node-burst` / none |
+| `distributed-rate-limiter` / `coordinator-outage-policy` | baseline | `distributed-rate-limiter-outage-policy` | `distributed-rate-limiter-outage-policy-trades-availability-for-quota` | `shared-fail-closed` | — | `coordinator-outage` / `coordinator-unavailable` |
+| `distributed-rate-limiter` / `coordinator-outage-policy` | variant | `distributed-rate-limiter-outage-policy` | `distributed-rate-limiter-outage-policy-trades-availability-for-quota` | `shared-fail-open` | — | `coordinator-outage` / `coordinator-unavailable` |
+
+这六格只支持令牌桶边界、配额放大和协调器故障策略等有限结论；它们不代表生产容量或真实分布式环境认证。身份、选择、A/B 提交与本地限制详见[证据方法论](docs/methodology/evidence.md)。
+
+## 工具链与验证入口
+
+仓库要求 `go.mod` 指定的精确工具链 **go1.26.5**。Make recipes 固定 `LC_ALL=C`、`TZ=UTC` 和只读模块模式，并校验工具链与模块摘要。
+
+常用入口：
+
+```sh
+make fmt vet unit fuzz race content coverage
+make verify-fast
+make verify-deep
+make evidence
+make audit-evidence
+```
+
+- `make verify-fast` 是 push/PR 的开发门禁，包含格式、静态检查、单测、fuzz、race、内容、覆盖率和外部临时目录中的 smoke 证据。
+- `make verify-deep` 在独立临时证据根运行完整六格；CI 传入 artifact root 时会保留可审计产物，但不会把 CI 结果提交回仓库。
+- `make evidence` 只用于规定的 source commit A 独立 clone 生成不可变证据；`make audit-evidence` 只读审计已提交证据。
+- `make clean` 仅删除 `generated/.bin` 与 `generated/.verify`，不会删除证据或覆盖率文档。
+
+## W0 发布警告
+
+正式发布当前被有意阻塞。`make verify` 在 W0 **必须返回非零**：release validation 应当只产生一条 `release_scope_incomplete` 错误，精确报告 `complete=1 baseline=75 missing=74` 和排序后的 74 个缺失 ID。
+
+需要验证“阻塞状态本身准确”时运行：
+
+```sh
+scripts/assert-w0-release-contract.sh "$(pwd)"
+```
+
+该包装器只在上述 expected-negative 契约完全匹配时返回成功；它不会把 W0 描述成通过正式发布。
 
 ## 许可证
 

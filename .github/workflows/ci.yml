@@ -1,0 +1,104 @@
+name: W0 verification
+
+on:
+  push: {}
+  pull_request: {}
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  verify-fast:
+    if: "${{ github.event_name == 'push' || github.event_name == 'pull_request' }}"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+      - name: Verify exact toolchain and modules
+        run: |
+          test "$(go env GOVERSION)" = "go1.26.5"
+          go mod verify
+      - name: Run fast verification
+        run: make verify-fast
+
+  w0-release-contract:
+    if: "${{ github.event_name == 'push' || github.event_name == 'pull_request' }}"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+      - name: Verify exact toolchain and modules
+        run: |
+          test "$(go env GOVERSION)" = "go1.26.5"
+          go mod verify
+      - name: Require the W0 contract test exactly once
+        run: |
+          test_list="$(
+            go test ./internal/cli -list '^TestW0ReleaseScopeContract$'
+          )"
+          test_count="$(printf '%s\n' "$test_list" | awk '$0 == "TestW0ReleaseScopeContract" { count++ } END { print count+0 }')"
+          test "$test_count" -eq 1
+      - name: Run the W0 expected-negative contract
+        run: go test ./internal/cli -run '^TestW0ReleaseScopeContract$' -count=1 -v
+
+  verify-deep:
+    if: "${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+      - name: Verify exact toolchain and modules
+        run: |
+          test "$(go env GOVERSION)" = "go1.26.5"
+          go mod verify
+      - name: Run deep verification and preserve its evidence
+        run: |
+          artifact_root="$RUNNER_TEMP/w0-deep"
+          mkdir -p "$artifact_root"
+          set +e
+          make build
+          status=$?
+          if [ "$status" -eq 0 ]; then
+            scripts/verify-experiments.sh deep "$GITHUB_WORKSPACE" "$RUNNER_TEMP/w0-deep"
+            status=$?
+          fi
+          set -e
+          printf 'exit_code=%s\n' "$status" >"$artifact_root/status.txt"
+          exit "$status"
+      - name: Upload deep verification evidence
+        if: "${{ always() }}"
+        uses: actions/upload-artifact@v7
+        with:
+          name: w0-deep-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/w0-deep
+          retention-days: 14
+          overwrite: false
+          include-hidden-files: false
+          if-no-files-found: error
