@@ -21,5 +21,5 @@ claims:
     statement: 外卖完成时间同时受备餐、取餐等待和后续停靠约束，距离餐厅最近的骑手不等于最早交付。
   - id: food-delivery-dispatch-insertion-must-validate-whole-plan
     statement: 新订单插入多单路线时必须重新验证整条停靠序列的容量和时间窗，局部增量最短不能证明既有承诺不被击穿。
-  - id: food-delivery-dispatch-replan-must-use-plan-version
-    statement: 取消、备餐延期与骑手状态变化必须基于计划版本重排，否则并发优化结果会覆盖更新并保留幽灵容量。
+  - id: food-delivery-dispatch-assignment-needs-order-owner
+    statement: order owner 的 reservation/version CAS 必须是唯一分配决策，courier plan 只能用同一 token/version 做 propose 与 commit，否则跨 owner 并发会产生双分配或幽灵容量。

@@ -20,5 +20,5 @@ claims:
     statement: 交通边权持续变化时最优路线只能相对于一个可声明快照成立，更快刷新以计算、发布和路径抖动为代价。
   - id: maps-navigation-optimal-search-needs-admissible-heuristic
     statement: 若声称给定快照下最优，启发式估价就不能高估剩余成本，否则提前终止可能遗漏真实最短路。
-  - id: maps-navigation-reroute-must-exceed-switching-cost
-    statement: 重规划收益必须超过绕行、驾驶认知和路线抖动的切换成本，边权一变就重算会降低实际到达质量。
+  - id: maps-navigation-hard-restriction-requires-observed-generation
+    statement: 硬限制在控制面提交不等于路由节点已经执行，节点只有证明已观察路径安全区域所需代际或通过 ACK barrier 后才能释放路线。

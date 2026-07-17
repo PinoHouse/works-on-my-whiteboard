@@ -17,9 +17,9 @@ dimensions:
   - observability-release-evolution
   - security-privacy-multitenancy
 claims:
-  - id: ride-hailing-dispatch-location-index-cannot-grant-driver-ownership
-    statement: 附近司机索引只能发现候选，不能授予司机所有权；最终分配必须由司机会话权威仲裁。
+  - id: ride-hailing-dispatch-parallel-offer-needs-request-winner
+    statement: 司机 owner 的 CAS 只能防止一名司机接两单，并行 offer 还必须由 request/trip owner 对 winner token 做唯一 CAS，才能防止一单匹配多名司机。
   - id: ride-hailing-dispatch-acceptance-must-bind-driver-lease-epoch
-    statement: 接单必须在当前司机租约 epoch 下原子提交，否则超时 offer、断线重连和重复响应会把同一司机分给多单。
+    statement: 接单预约必须在当前司机租约 epoch 下把 available 原子变为 reserved(token,request,epoch)，否则超时 offer、断线重连和重复响应会把同一司机分给多单。
   - id: ride-hailing-dispatch-radius-trades-recall-for-wait-and-deadhead
     statement: 扩大候选半径提高匹配召回，却必然增加接驾等待与司机空驶，不能把找到司机等同于高质量派单。
