@@ -1,0 +1,24 @@
+schema_version: 1
+id: inference-gateway
+title: 推理网关
+primary_family: ai-vector
+required: true
+status: draft
+dimensions:
+  - problem-slo
+  - capacity-cost-skew
+  - contracts-data-invariants
+  - placement-routing-sharding
+  - consistency-ordering-time
+  - concurrency-transactions-idempotency
+  - async-backpressure-fairness
+  - failure-recovery-disaster
+  - observability-release-evolution
+  - security-privacy-multitenancy
+claims:
+  - id: inference-gateway-admission-must-price-token-and-residency
+    statement: 多模型推理的成本由输入输出令牌、模型驻留与内存预算共同决定，只按请求数准入会制造显存溢出和冷加载抖动。
+  - id: inference-gateway-deadline-and-fairness-require-explicit-scheduling
+    statement: 吞吐最优的动态批处理可以持续拖延短截止期或低流量租户，deadline 与公平必须成为显式调度约束。
+  - id: inference-gateway-cancellation-requires-fenced-attempts
+    statement: 取消只有在旧执行 attempt 被世代栅栏阻止继续生成、提交和计费时才完成，连接断开本身不是资源回收证明。

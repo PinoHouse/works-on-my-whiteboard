@@ -1,0 +1,24 @@
+schema_version: 1
+id: embedding-index-pipeline
+title: 嵌入与索引流水线
+primary_family: ai-vector
+required: true
+status: draft
+dimensions:
+  - problem-slo
+  - capacity-cost-skew
+  - contracts-data-invariants
+  - consistency-ordering-time
+  - concurrency-transactions-idempotency
+  - cache-index-amplification
+  - async-backpressure-fairness
+  - failure-recovery-disaster
+  - observability-release-evolution
+  - security-privacy-multitenancy
+claims:
+  - id: embedding-index-pipeline-compatibility-requires-joint-versioning
+    statement: 查询向量与文档向量只有在兼容的切块、预处理和嵌入空间中才可比较，单独记录模型名称不足以证明兼容。
+  - id: embedding-index-pipeline-cutover-requires-generation-manifest
+    statement: 查询路由必须原子选择一个完整索引代际，逐分片切换会让同一次请求混合新旧空间并产生无法解释的结果。
+  - id: embedding-index-pipeline-rebuild-amplification-must-be-budgeted
+    statement: 模型或切块变更会把一次逻辑升级放大为全语料读取、推理、写索引与双代验证，回填必须受成本和新鲜度预算约束。

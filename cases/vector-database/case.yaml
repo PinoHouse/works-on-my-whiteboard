@@ -1,0 +1,25 @@
+schema_version: 1
+id: vector-database
+title: 向量数据库
+primary_family: ai-vector
+required: true
+status: draft
+dimensions:
+  - problem-slo
+  - capacity-cost-skew
+  - contracts-data-invariants
+  - placement-routing-sharding
+  - consistency-ordering-time
+  - concurrency-transactions-idempotency
+  - cache-index-amplification
+  - async-backpressure-fairness
+  - failure-recovery-disaster
+  - observability-release-evolution
+  - security-privacy-multitenancy
+claims:
+  - id: vector-database-ann-trades-recall-for-bounded-work
+    statement: 近似最近邻以不遍历全部向量换取有界工作量，因此延迟下降的同时必须显式接受并度量召回损失。
+  - id: vector-database-delete-requires-generation-fenced-tombstones
+    statement: 删除只有在墓碑覆盖所有可服务索引代际并阻止旧段重新挂载时才成立，移除一份可变索引记录不足以防止复活。
+  - id: vector-database-filtering-must-enter-candidate-planning
+    statement: 高选择性元数据过滤若只在近邻搜索后执行，会耗尽候选预算并返回不足 k 个结果，过滤必须进入候选规划。

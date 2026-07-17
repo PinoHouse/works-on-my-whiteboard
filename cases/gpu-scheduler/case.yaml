@@ -1,0 +1,24 @@
+schema_version: 1
+id: gpu-scheduler
+title: GPU 调度器
+primary_family: ai-vector
+required: true
+status: draft
+dimensions:
+  - problem-slo
+  - capacity-cost-skew
+  - contracts-data-invariants
+  - placement-routing-sharding
+  - consistency-ordering-time
+  - concurrency-transactions-idempotency
+  - async-backpressure-fairness
+  - failure-recovery-disaster
+  - observability-release-evolution
+  - security-privacy-multitenancy
+claims:
+  - id: gpu-scheduler-placement-must-respect-topology-and-gang-atomicity
+    statement: 分布式训练或张量并行任务只有在整组设备同时满足互联与显存约束时才有用，逐卡独立分配会形成昂贵空等。
+  - id: gpu-scheduler-lease-expiry-needs-device-level-fencing
+    statement: 控制面租约过期只表达调度器的判断，必须由设备侧世代栅栏阻止旧任务继续使用 GPU，才能安全复用。
+  - id: gpu-scheduler-preemption-trades-recovery-cost-for-fairness
+    statement: 抢占能缩短高优先级等待，却把代价转化为 checkpoint、恢复和已完成计算损失，是否抢占必须比较剩余工作与恢复成本。

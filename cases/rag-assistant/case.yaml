@@ -1,0 +1,23 @@
+schema_version: 1
+id: rag-assistant
+title: RAG 助手
+primary_family: ai-vector
+required: true
+status: draft
+dimensions:
+  - problem-slo
+  - capacity-cost-skew
+  - contracts-data-invariants
+  - consistency-ordering-time
+  - cache-index-amplification
+  - async-backpressure-fairness
+  - failure-recovery-disaster
+  - observability-release-evolution
+  - security-privacy-multitenancy
+claims:
+  - id: rag-assistant-grounding-requires-versioned-lineage
+    statement: 可追溯回答必须绑定文档版本、切块器、嵌入模型、索引代际、提示模板与生成模型，只有最终文本无法证明依据来自哪里。
+  - id: rag-assistant-current-authorization-must-fence-generation
+    statement: 检索时通过权限检查不代表稍后仍可披露；回答发布前必须以当前授权世代重新约束证据与输出。
+  - id: rag-assistant-retrieval-quality-is-a-budgeted-recall-problem
+    statement: 在有界检索工作量下扩大候选、重排和上下文会提高召回机会，却同时增加延迟、令牌成本与无关证据干扰。

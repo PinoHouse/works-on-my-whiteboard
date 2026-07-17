@@ -1,0 +1,24 @@
+schema_version: 1
+id: code-assistant
+title: 代码助手
+primary_family: ai-vector
+required: true
+status: draft
+dimensions:
+  - problem-slo
+  - capacity-cost-skew
+  - contracts-data-invariants
+  - consistency-ordering-time
+  - concurrency-transactions-idempotency
+  - cache-index-amplification
+  - async-backpressure-fairness
+  - failure-recovery-disaster
+  - observability-release-evolution
+  - security-privacy-multitenancy
+claims:
+  - id: code-assistant-context-must-bind-revision-and-permission
+    statement: 代码上下文必须同时绑定仓库修订与当前路径权限，缓存命中不能证明旧内容在本次请求中仍可披露。
+  - id: code-assistant-generation-is-not-a-commit-authority
+    statement: 模型生成补丁只产生候选意图，写入当前分支前仍需基于最新修订做适用性、权限与验证检查。
+  - id: code-assistant-context-budget-requires-structural-selection
+    statement: 仓库通常大于上下文窗口，按文件顺序截断无法稳定保留定义、调用关系与失败约束，选择必须利用结构和任务目标。
