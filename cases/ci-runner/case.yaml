@@ -10,7 +10,7 @@ dimensions:
   - contracts-data-invariants
   - concurrency-transactions-idempotency
   - failure-recovery-disaster
-  - overload-backpressure-degradation
+  - async-backpressure-fairness
   - observability-release-evolution
   - security-privacy-multitenancy
 claims:

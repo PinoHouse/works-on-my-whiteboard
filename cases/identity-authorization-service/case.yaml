@@ -11,7 +11,7 @@ dimensions:
   - consistency-ordering-time
   - cache-index-amplification
   - failure-recovery-disaster
-  - overload-backpressure-degradation
+  - async-backpressure-fairness
   - observability-release-evolution
   - security-privacy-multitenancy
 claims:

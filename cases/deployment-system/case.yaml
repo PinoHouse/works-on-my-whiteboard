@@ -12,7 +12,7 @@ dimensions:
   - consistency-ordering-time
   - concurrency-transactions-idempotency
   - failure-recovery-disaster
-  - overload-backpressure-degradation
+  - async-backpressure-fairness
   - observability-release-evolution
 claims:
   - id: deployment-system-progress-must-bind-rollout-generation
