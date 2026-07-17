@@ -14,17 +14,17 @@
 
 ## 客观模型
 
-接口为 `Submit(job_spec, priority, tenant, idempotency_key)`、`Acquire(allocation_id, expected_epoch)`、`Heartbeat(allocation_id, epoch)`、`Checkpoint(job_id, state_digest)` 与 `Release(allocation_id, epoch)`。job_spec 包含不可变的 GPU count/type、每卡显存、允许拓扑、gang 语义、预计时长与 checkpoint 能力。设备目录记录健康、拓扑域、可分配显存、隔离模式和 device fence generation；allocation 保存整组设备、lease_epoch、状态与 owner。
+接口为 `Submit(job_spec, priority, tenant, idempotency_key)`、`Acquire(allocation_id, expected_epoch)`、`Heartbeat(allocation_id, epoch)`、`Checkpoint(job_id, state_digest)` 与 `Release(allocation_id, epoch)`。job_spec 包含不可变的 GPU count/type、每卡显存、允许拓扑、gang 语义、预计时长与 checkpoint 能力。设备目录显式建模 `physical_gpu → partition/MIG_instance → allocation`：父卡保存健康、P2P/NVLink 拓扑和 physical_fence_generation，每个子分区保存 profile、显存和 partition_fence_generation，allocation 再保存 lease_epoch 与 owner。
 
 设节点总显存空闲和为 `F_total`，但一个请求需单卡连续显存 `m`；可分配容量不是 `F_total/m`。例如四张 80GB 卡各碎片化剩 20GB，总空闲 80GB，却无法放置一个需单卡 40GB 的任务。分布式作业每步时间近似 `Tstep=max(Tcompute_i)+Tcollective(topology,bytes)+Tstraggler`；把八卡 gang 跨低带宽机架可能虽然“放下”却使训练时间翻倍。排队还受 gang size 的装箱与 head-of-line blocking 影响。
 
-调度器拥有期望 allocation，节点 agent/设备插件拥有实际启动与 device fence，checkpoint 存储拥有可恢复状态。关键不变量：gang 要么全部设备在同一 epoch 获得并通过启动 barrier，要么全部回滚；一个物理设备任一时刻只接受当前 fence generation；租户借用不能越过可回收边界；checkpoint 必须绑定代码/模型/优化器与 runtime 兼容谱系。
+调度器拥有期望 allocation，节点 agent/设备插件拥有父卡与 partition 的实际启动/fence，checkpoint 存储拥有可恢复状态。关键不变量：gang 要么全部设备在同一 epoch 获得并通过启动 barrier，要么全部回滚；allocation 必须同时匹配父卡、分区和自身三个当前 epoch；父卡 reset/故障会让所有 sibling slice 一起失效；P2P 与拓扑能力只按 physical GPU 关系声明。租户借用不能越过可回收边界。
 
 ## 必然约束
 
 [DEDUCED:gpu-scheduler-placement-must-respect-topology-and-gang-atomicity] 分布式训练或张量并行任务只有在整组设备同时满足互联与显存约束时才有用，逐卡独立分配会形成昂贵空等。最小反例是四卡 job，调度器先占三张，第四张长期不可用；前三张既不能产生训练 step，又阻止三个单卡任务运行。即使凑足四张，若两张跨慢速链路，collective 成为瓶颈。故候选选择要同时满足 gang、显存与拓扑，并以 reservation+commit barrier 原子启动。
 
-[DEDUCED:gpu-scheduler-lease-expiry-needs-device-level-fencing] 控制面租约过期只表达调度器的判断，必须由设备侧世代栅栏阻止旧任务继续使用 GPU，才能安全复用。事件序列：控制面与节点 A 分区，判定 allocation epoch 5 过期并把 GPU 分给 epoch 6；A 上旧进程仍执行和写 checkpoint。若只有数据库状态，新旧任务会并用设备并污染输出。节点 agent、设备 cgroup/插件或强制 reset 必须确认 fence 5 后才 ACK 6 可用；不能确认就隔离节点而非超卖。
+[DEDUCED:gpu-scheduler-lease-expiry-needs-device-level-fencing] 控制面租约过期只表达调度器的判断，必须由设备侧世代栅栏阻止旧任务继续使用 GPU，才能安全复用。对 MIG 不能只 fence 子 allocation：同一父卡上的 slice A reset 或父卡 ECC 故障会影响 sibling slice B。节点 agent 必须同时校验 physical、partition 与 allocation generation；一旦需要父卡 reset，就隔离父卡及全部子分区，终止/重建 sibling，健康确认后才重新准入。不能确认时宁可隔离而非超卖。
 
 [DEDUCED:gpu-scheduler-preemption-trades-recovery-cost-for-fairness] 抢占能缩短高优先级等待，却把代价转化为 checkpoint、恢复和已完成计算损失，是否抢占必须比较剩余工作与恢复成本。一个还剩 2 分钟的低优任务若 checkpoint+恢复需 8 分钟，为让高优任务提前 2 分钟而抢占会增加系统总完成时间；另一个剩 10 小时且 30 秒可恢复的任务则适合抢占。优先级不能单独决定，需估计 `benefit_wait_saved > checkpoint+restore+lost_work+fragmentation`。
 
@@ -40,9 +40,9 @@
 
 ## 设计决定
 
-调度循环从版本化设备快照生成候选，先做硬约束过滤，再以拓扑代价、碎片增量、公平 debt 和预计完成时间评分。gang 进入 `RESERVING`，所有节点 agent 对设备 fence generation 做条件推进并 ACK；全部成功后 allocation 才 `RUNNING`，任一失败则释放全部 reservation。控制面重复 reconcile 依靠 allocation id/epoch 幂等。
+调度循环从版本化设备快照生成候选，先在 physical GPU 图上检查 P2P/NVLink/故障域，再选择其 partition/MIG instance，以拓扑代价、碎片增量、公平 debt 和预计完成时间评分。gang 进入 `RESERVING`，所有节点 agent 对 physical、partition、allocation 三层 generation 做条件确认并 ACK；全部成功后才 `RUNNING`。子分区不能虚构父卡没有的 P2P 能力。
 
-心跳丢失先冻结新 checkpoint 提交，租约到期触发节点侧停止、清理 GPU memory、必要时 reset；只有 fence ACK 后设备回到 FREE。节点不可达时标记隔离，不能在另一逻辑记录里复用同一物理卡。抢占先请求受害者生成兼容 checkpoint，校验 digest 与谱系后停止并 fence；超时是否强杀由 job class 契约决定。
+心跳丢失先冻结新 checkpoint 提交，租约到期触发节点侧停止并推进 allocation/partition fence；若需父卡 reset 或发现父级健康故障，立即隔离 physical GPU 和全部 sibling partitions，终止或 checkpoint 可恢复 sibling，重建设备分区并通过显存清理、ECC、拓扑健康检查后才提升 physical fence、重新准入。节点不可达时整张父卡保持隔离。抢占仍需校验 checkpoint digest 与兼容谱系。
 
 过载先限制低优租户新 gang，再回收借用和 backfill，之后抢占“恢复成本/释放资源”比最低者；不会破坏设备隔离或把部分 gang 当成功。job 记录模型/数据快照、代码、容器、驱动/runtime、并行配置、随机种子和 checkpoint 版本。它支持故障归因，但 collective 顺序、硬件数值和上游概率模型仍使结果可能不确定。
 
@@ -50,9 +50,9 @@
 
 SLI 包括按 gang size/租户的排队与启动延迟、设备利用率、可分配/物理空闲显存差、拓扑降速、reservation 回滚、fence 延迟、孤儿进程、抢占 checkpoint/恢复时间和丢失 GPU 小时。成本按成功训练 step 或完成 job 的设备小时、网络与 checkpoint 存储计算；质量侧对固定模型任务监控收敛/推理指标，防止 runtime 或拓扑变化静默影响结果。
 
-故障演练：t0 四卡 allocation epoch 5 运行；t1 控制面与节点 N1 分区；t2 租约过期，调度器请求 epoch 6，但 N1 无法 ACK device fence；t3 整个 gang 保持隔离，候选新任务不启动；t4 节点恢复，agent 杀死 epoch 5、清理显存并提升 fence 到 6，旧进程任何 checkpoint 提交因 epoch 5 被拒绝；t5 才释放设备。演练证明“数据库改 owner”不足以安全复用。
+故障演练：t0 父卡 P 的 MIG slice A/B 分别运行 allocation epoch 5/9；t1 A 触发需父卡 reset 的故障；t2 调度器不能只把 A 标坏而保留 B，agent 隔离 P、推进 physical fence，并终止或从 checkpoint 重建 A/B；t3 任何旧 partition/allocation epoch 提交均被拒绝；t4 reset、显存清理、ECC 与 P2P 健康确认通过后重建 slices 并提升各自 fence；t5 才重新准入。演练证明 sibling 的故障域在父卡。
 
-升级调度算法先对历史不可变 job trace 做仿真，再在影子队列比较排队、公平、碎片和设备小时，小池灰度并保留旧 scorer。节点 agent/驱动升级按故障域滚动，运行 job 固定兼容代。切换条件包括 fence 超时越过安全预算立即停止扩灰，以及算法降低等待却使恢复损失超过节省设备小时则回滚；阈值由压测、混沌演练和业务优先级校准，不虚构已有测量。
+每次 release 绑定不可变 eval manifest：job trace/设备拓扑与故障注入集 digest、期望可行放置与优先级标签 digest、运维公平 rubric 或 simulator/judge version、排队/碎片/设备小时/收敛质量指标实现版本。新算法只在同一 manifest 上与旧 scorer 比较；trace 或指标改版先重建基线。小池灰度与回滚都记录 manifest。fence 超时越界立即停灰，若等待下降却使恢复损失或固定训练任务收敛质量恶化则回滚。
 
 ## 面试考察本质
 

@@ -10,7 +10,7 @@
 
 先问向量条数 `N`、维度 `d`、数据类型、写删速率、查询峰值、租户与热点分布；距离是余弦、内积还是欧氏，是否先归一化。质量要定义精确基线下的 `recall@k`、过滤后返回完整率与业务相关性，体验定义读己之写、写可见 lag、查询 `p95/p99`，成本定义每百万向量 RAM/SSD、每千查询 CPU 与建图放大。
 
-过滤是租户隔离、ACL、时间范围还是任意谓词，选择性分布决定先过滤还是后过滤。删除要求立即不可见还是允许秒级窗口，故障恢复能否挂载旧快照；写确认代表 WAL 持久、memtable 可查还是所有副本索引完成。还要问索引类型、分片/副本、跨地域、备份 RPO/RTO、模型/归一化版本和数据删除法规。非目标是保证 ANN 总能返回精确 top-k，也不承诺确定基础设施能让上游 embedding 或生成输出确定。
+过滤是租户隔离、ACL、时间范围还是任意谓词，选择性分布决定先过滤还是后过滤。删除要求立即不可见还是允许秒级窗口，故障恢复能否挂载旧快照；写确认代表 WAL 持久、memtable 可查还是所有副本索引完成。备份要分别问 RPO（允许丢多少新写）与 retention/最老可恢复时间点（多老的快照仍能恢复），二者不能混用。还要问索引类型、分片/副本、跨地域、模型/归一化版本和数据删除法规。
 
 ## 客观模型
 
@@ -24,7 +24,7 @@
 
 [DEDUCED:vector-database-ann-trades-recall-for-bounded-work] 近似最近邻以不遍历全部向量换取有界工作量，因此延迟下降的同时必须显式接受并度量召回损失。若一百万个向量中真正第 10 近的节点不在已访问的 2,000 个图节点内，算法无法知道它存在；增加 `efSearch` 可提高访问概率，却增加 CPU、缓存未命中与 p99。没有针对过滤和数据分布的精确扫描对照，所谓“快”无法说明丢了多少结果。
 
-[DEDUCED:vector-database-delete-requires-generation-fenced-tombstones] 删除只有在墓碑覆盖所有可服务索引代际并阻止旧段重新挂载时才成立，移除一份可变索引记录不足以防止复活。事件序列：segment S1 含 id=7；删除写入新 memtable 并从当前缓存隐藏；节点故障后恢复器只挂载旧 S1。如果 manifest 没有全局 delete watermark，id=7 再次出现。因此墓碑在所有覆盖旧版本的 segment 被压缩并且备份恢复边界推进前不可回收，恢复也必须拒绝低于最低安全 generation 的目录。
+[DEDUCED:vector-database-delete-requires-generation-fenced-tombstones] 删除只有在墓碑覆盖所有可服务索引代际并阻止旧段重新挂载时才成立，移除一份可变索引记录不足以防止复活。事件序列：segment S1 含 id=7，今天删除后当前段已压缩，但一份保留六个月的月龄备份仍含 S1；“RPO 一小时”只限制新写损失，不会让该老备份消失。墓碑必须覆盖最老可恢复 snapshot/backup 的完整 retention，或恢复流程必须先回放不可截断删除日志，并以 `minimum_safe_seq/generation` 拒绝任何无法补齐删除的恢复点。
 
 [DEDUCED:vector-database-filtering-must-enter-candidate-planning] 高选择性元数据过滤若只在近邻搜索后执行，会耗尽候选预算并返回不足 k 个结果，过滤必须进入候选规划。上述选择率百分之一的反例显示取 100 只剩约 1 个；盲目把候选放大到 1,000 又使尾延迟十倍。系统需按过滤基数选择预过滤 bitmap、分区路由、联合遍历或自适应补搜，并把返回不足作为质量指标而非悄悄缩短结果。
 
@@ -42,7 +42,7 @@
 
 写先进入复制 WAL 并获得 sequence，当前 memtable 立即按最高版本可查；后台按 vector_space 构建不可变 segment。manifest 发布是唯一让新 segment 可服务的线性化点，一次查询固定 generation，扇出各 shard 后按距离、版本和 id 稳定合并。元数据统计估计过滤选择性：高选择性走 bitmap/分区预过滤，中等选择性联合遍历，低选择性可后过滤并自适应补搜。
 
-删除写入高于旧版本的 tombstone，查询合并阶段和 segment 内遍历都检查；compaction 只有在所有可恢复快照与副本 watermark 越过 delete_seq 后才丢墓碑。旧节点带过期 generation 恢复时必须从目录重新确认，不能自行宣布可服务。幂等键防止 upsert 重试制造新逻辑版本，读己之写可携带 minimum_seq 并等待副本追上或路由 leader。
+删除写入高于旧版本的 tombstone，查询合并阶段和 segment 内遍历都检查；compaction 只有在最老可恢复 snapshot、所有仍在 retention 的备份及副本 watermark 都越过 delete_seq 后才丢墓碑。若成本要求更早清理，则删除日志必须在备份完整 retention 内不可截断，restore 先回放到 `minimum_safe_seq`，无法回放的老备份明确不可恢复。旧节点/备份都必须通过 minimum_safe_generation 门禁，不能自行宣布可服务。
 
 过载先降低非关键查询的 `efSearch` 并标记质量等级，再限流大 `k` 和昂贵过滤，绝不绕过 ACL/墓碑。索引 generation、构建器和浮点配置全版本化以支持归因，但 ANN 并行遍历的 tie 与上游 embedding 可变性仍意味着不能把结果逐字节确定当默认契约。
 
@@ -50,9 +50,9 @@
 
 SLI 联合观察 `recall@k`、过滤后完整率、重复/旧版本率、删除后残留，及搜索 p50/p99、写可见 lag、segment build lag、compaction debt。成本看每百万向量 RAM/SSD、每千查询距离计算、写放大和副本传输；按 shard、filter 选择率、vector_space、generation 分桶，避免平均 recall 掩盖高选择性租户失败。
 
-故障演练：t0 S1 含 id 7/v3；t1 delete seq=900 持久化并对当前读隐藏；t2 构建 S2 尚未完成时节点崩溃；t3 恢复器发现本地 S1，但目录要求 tombstone watermark≥900，于是先回放 WAL，再允许服务；迟到副本尝试发布旧 manifest 被 generation CAS 拒绝。演练随后恢复旧备份，验证墓碑保留期覆盖备份 RPO，id 7 不复活。
+故障演练：t0 S1 含 id 7/v3，并生成一份需保留六个月的月备份；t1 delete seq=900 持久化；t2 当前段已 compaction；t3 从月龄备份恢复。恢复器看到 backup seq 低于 `minimum_safe_seq=900`，必须先回放保留期内不可截断的删除日志再允许服务；若日志缺口存在则拒绝该恢复点。演练刻意把 RPO 设为一小时，验证它不影响六个月 retention，id 7 仍不复活。
 
-新索引参数或实现先影子构建 generation G+1，在分层样本上与精确扫描比较 recall、过滤完整率、p99 和成本；灰度查询整次绑定一代，回滚只移动目录指针。切换条件包括 recall 低于业务下限立即回滚，以及 compaction GPU/CPU 超预算时延长 segment 但不越过删除安全水位。阈值必须由离线真值、容量压测和恢复演练得出，本文不声称已有测量。
+每个 release 绑定不可变 eval manifest：查询向量/过滤条件集 digest、精确 top-k 与可见性标签 digest、相关性人工 rubric 或 judge version、recall/过滤完整率/p99/成本指标实现版本。新 generation 只有在同一 manifest 上与精确扫描比较才可声称提升；标签或指标改版先重建基线。灰度查询与回滚目录都记录该 manifest。recall 低于业务下限立即回滚，compaction 超预算时可延长 segment，但不可越过删除安全水位。
 
 ## 面试考察本质
 

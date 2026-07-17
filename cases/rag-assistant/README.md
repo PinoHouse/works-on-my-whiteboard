@@ -52,7 +52,7 @@
 
 故障演练：t0 用户获权并检索文档 v7；t1 候选已装入上下文；t2 管理员撤权并把 epoch 从 41 推到 42；t3 生成器完成含机密短语的草稿；t4 发布器看到 42 与 attempt 的 41 不同，重新校验失败并丢弃缓冲，用户只收到权限已变化。随后模拟权限服务不可用：私有库 fail-closed，公开库可按缓存策略继续。演练验证日志不记录正文、旧 chunk 不从答案缓存泄露。
 
-升级先离线固定一组带权限、时效和无答案问题，影子构建新 chunk/model/index generation，比较 recall、groundedness、延迟和单位答案成本；灰度查询整次绑定新代，回滚只改目录指针。每月做删除穿透与旧 segment 恢复演练。业务切换条件包括无依据断言率超过风险预算即回滚生成配置，以及每个有效答案成本超过人工替代收益时缩小候选/模型；具体预算由业务校准，不能虚构评测结论。
+每次 release 绑定不可变 eval manifest：带权限/时效/无答案的 query-set digest、相关 chunk 与引用蕴含标签 digest、人工 groundedness rubric 或 judge version、recall/引用覆盖/拒答/无依据率指标实现版本。新 chunk/model/index 只有在同一 manifest 上比较 recall、groundedness、延迟和单位答案成本才可声称提升；题集、标签或 judge 改版先重建基线。灰度与回滚都记录该 manifest。无依据率越过风险预算即回滚，每个有效答案成本越过业务收益则缩小候选或模型。
 
 ## 面试考察本质
 

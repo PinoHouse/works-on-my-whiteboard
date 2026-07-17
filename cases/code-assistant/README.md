@@ -14,17 +14,17 @@
 
 ## 客观模型
 
-最小接口为 `BuildContext(repo_id, base_revision, workspace_digest, principal, task)`、`Generate(context_manifest, intent, request_id)`、`Validate(patch_digest, base_revision, toolchain_digest)` 与 `Apply(patch, expected_head)`。context manifest 保存获准文件的 `(path, blob_digest, revision, permission_epoch)`、符号/调用关系、检索器与索引 generation；attempt 保存模型、分词器、提示模板、采样配置、候选 patch、secret 扫描和验证谱系。仓库服务拥有 revision，权限服务拥有 epoch，应用操作的线性化点是目标 ref 的 compare-and-swap，而模型不拥有写权限。
+最小接口为 `BuildContext(repo_id, base_revision, workspace_digest, principal, task)`、`Generate(context_manifest, intent, request_id)`、`Validate(patch_digest, base_revision, workspace_digest, toolchain_digest)`、`ApplyLocal(patch, expected_head, expected_workspace_digest)` 与 `PublishBranch(patch, expected_ref)`。context manifest 保存获准文件的 `(path, blob_digest, revision, permission_epoch)`、符号/调用关系、检索器与索引 generation；patch artifact 额外绑定生成时的 `base_revision`、完整 `workspace_digest` 和每个读写文件的 preimage digest。attempt 保存模型、分词器、提示模板、采样配置、候选 patch、secret 扫描和验证谱系。仓库服务拥有远端 revision，工作树拥有本地 preimage，权限服务拥有 epoch；模型不拥有任何写权限。
 
 设仓库 token 总量为 `R`，上下文预算为 `B` 且 `R≫B`。选择器的目标不是截取前 `B` 个 token，而是在预算内最大化与任务有关的定义、调用者、测试和约束覆盖。单请求成本近似为 `C=C_index_lookup+C_model(B,O)+ΣC_validator`，跨文件候选数 `m`、测试分片数 `s` 会把验证放大到 `m*s`。热门基础库、生成的大文件和少数超大 diff 形成明显偏斜。
 
-不变量包括：上下文中的每个字节可回到指定 repo revision 与当时/当前允许的路径；任何包含 secret 或被撤权内容的候选不得发送；patch 只能对匹配 expected_head 的树应用；验证报告绑定 patch、构建镜像与依赖锁摘要。确定的上下文选择和构建容器可以缩小重放差异，但模型采样、硬件数值和并行批次仍使候选不保证逐字确定。
+不变量包括：上下文中的每个字节可回到指定 repo revision 与当时/当前允许的路径；任何包含 secret 或被撤权内容的候选不得发送；patch 只能对同时匹配 expected_head、workspace_digest、逐文件 preimage 和当前权限的工作树原子应用；远端发布另以 branch ref CAS 线性化。验证报告绑定 patch、工作树、构建镜像与依赖锁摘要。确定的上下文选择和构建容器可以缩小重放差异，但模型采样、硬件数值和并行批次仍使候选不保证逐字确定。
 
 ## 必然约束
 
 [DEDUCED:code-assistant-context-must-bind-revision-and-permission] 代码上下文必须同时绑定仓库修订与当前路径权限，缓存命中不能证明旧内容在本次请求中仍可披露。反例是用户在 revision A 时可读 `secrets/client.go`，上下文缓存已保存它；管理员撤权并推进 permission_epoch 后，用户在 revision B 请求解释。若缓存键只有 repo 和 query，相同命中会泄露旧文件。故缓存至少按 blob digest 与授权世代校验，发送模型前还需当前权限栅栏；撤权删除要覆盖派生索引。
 
-[DEDUCED:code-assistant-generation-is-not-a-commit-authority] 模型生成补丁只产生候选意图，写入当前分支前仍需基于最新修订做适用性、权限与验证检查。事件序列：t0 助手基于 head 100 修改函数签名；t1 开发者把 head 推到 101 并新增调用点；t2 助手直接提交基于 100 的 patch。即便文本能三方合并，它也可能漏改新调用点。对 `expected_head=100` 的 CAS 必须失败，重新取上下文、重放意图或交给用户解决，不能把生成时间的正确性延伸到当前树。
+[DEDUCED:code-assistant-generation-is-not-a-commit-authority] 模型生成补丁只产生候选意图，写入当前工作树或远端分支前仍需基于最新修订、逐文件 preimage 与权限做适用性检查。事件序列一：t0 助手基于 head 100 修改函数签名，t1 同事把远端 ref 推到 101；发布的 `expected_ref=100` CAS 必须失败。事件序列二：HEAD 仍是 100，但开发者在本地未提交地改了同一文件；若只检查 HEAD，patch 会覆盖本地意图，因此 workspace/preimage 校验也必须失败。两种失败都应重新取上下文、重放意图或交给用户解决，不能把生成时间的正确性延伸到当前树。
 
 [DEDUCED:code-assistant-context-budget-requires-structural-selection] 仓库通常大于上下文窗口，按文件顺序截断无法稳定保留定义、调用关系与失败约束，选择必须利用结构和任务目标。一个 10 万 token 仓库只允许 8 千 token 上下文时，目标函数定义在末尾、测试在另一模块；按字母序装入前 8 千会同时漏掉二者。增加窗口可降低漏选概率，却线性增加预填充延迟和费用，并让无关内容竞争注意力，因此必须度量 context recall，而不是把最大窗口当唯一答案。
 
@@ -40,9 +40,9 @@
 
 ## 设计决定
 
-请求先固定 `(repo_id, base_revision, workspace_digest, principal, permission_epoch)`。选择器从当前 revision 的符号图、文本索引和用户打开文件构造 context manifest，每个片段带 blob digest、路径与选择理由；发送前重新检查路径权限和 secret policy。对本地未提交内容只使用会话加密存储，默认不进入共享缓存或训练。生成 attempt 固定模型、分词器、提示、索引和工具协议版本，候选先解析成结构化 patch。
+请求先固定 `(repo_id, base_revision, workspace_digest, principal, permission_epoch)`。选择器从当前 revision 的符号图、文本索引和用户打开文件构造 context manifest，每个片段带 blob digest、路径与选择理由；发送前重新检查路径权限和 secret policy。对本地未提交内容只使用会话加密存储，默认不进入共享缓存或训练。生成 attempt 固定模型、分词器、提示、索引和工具协议版本；结构化 patch artifact 写入 context 的 workspace digest，并为每个读取、修改、删除或新增路径保存 preimage digest（新增路径保存“必须不存在”哨兵）。
 
-验证按风险分层：格式/解析、类型与定向测试先跑，依赖与安全扫描随后；报告记录 toolchain/container digest。用户接受时，服务对 expected_head 做 CAS；失败则显示冲突并可基于新 head 重新生成，但新候选是新 attempt，不伪装为旧结果。取消会终止验证租约并停止计费，网络重试以 request_id 返回同 attempt。
+验证按风险分层：格式/解析、类型与定向测试先跑，依赖与安全扫描随后；报告记录 toolchain/container digest。用户在本地接受时，应用器在一个原子事务内重新检查 repo HEAD、完整 workspace digest、所有文件 preimage 以及当前路径写权限，任一变化都保持工作树不变并要求重生成；远端 PR/分支发布不读取本地工作树，而对 expected branch ref 单独做 CAS。这样明确区分“本地原子应用”与“远端引用推进”。取消会终止验证租约并停止计费，网络重试以 request_id 返回同 attempt。
 
 过载先停用昂贵的多候选与全仓测试，再降为当前文件补全，最后拒绝异步重构；任何层级都不降低权限或 secret 检查。模型、索引和构建基础设施即使完全版本化，概率候选仍可能不同，因而重放承诺是“相同输入与环境可分析”，不是逐字符相同。
 
@@ -50,9 +50,9 @@
 
 SLI 以接受后结果为中心：上下文定义/测试召回率、候选接受率、apply 成功率、编译与目标测试通过率、合入后回滚/缺陷率；体验看首候选、完整 patch、验证和取消释放延迟；成本看每个被接受 patch 的输入输出 token、索引 CPU 与沙箱分钟。安全监控跨权限候选、secret 阻断、撤权残留和未提交代码保留时间，并按 repo/model/index/toolchain generation 分桶。
 
-故障时间线：t0 用户基于 head 100 建 context；t1 助手生成并验证 patch P；t2 同事提交 101，修改相同接口；t3 用户点击应用。ref CAS 看到 expected 100、actual 101 而拒绝，P 保持候选状态；系统重新取得 101 和当前权限，生成 P2 并重跑定向测试。另一个演练在 t1 撤销私有目录权限，发送模型前的 epoch 栅栏必须使旧 context 失效并清除缓存引用。两条演练都验证模型无法越过写权限。
+故障时间线：t0 用户基于 head 100、workspace W7 建 context；t1 助手生成绑定各文件 preimage 的 patch P；t2 HEAD 未变，但用户把目标文件从 digest A 未提交地改成 B；t3 本地应用看到 expected W7/A、actual W8/B，原子拒绝且不写半个文件。另一支演练让远端 ref 从 100 变 101，branch CAS 独立失败；再在 t1 撤销目录权限，即使 HEAD 与 workspace 都未变，当前权限复查也必须拒绝。三条路径都要求新 attempt 和重验证。
 
-升级先用真实但脱敏的固定任务集影子评估 context recall、编译/测试、secret 漏检、延迟与单位接受成本；灰度按 repo 固定版本谱系，回滚保留旧索引读能力。每季度做旧 revision、撤权缓存和恶意提示注入演练。质量下降超过业务容忍或安全漏检非零即停止灰度；接受成本超过节省的评审分钟则降候选数，这些切换条件必须由离线评测、压测和业务价值校准。
+每次 release 绑定不可变 eval manifest：脱敏 repo/task fixture digest、期望测试与可接受 patch 标签 digest、人工正确性/可维护性 rubric 或 judge version、context-recall/编译/安全指标实现版本。升级只在同一 eval manifest 上比较 context recall、目标测试通过、secret 漏检、延迟与单位接受成本；数据或 rubric 变化先建立新基线，不能与旧分数直接宣称提升。灰度按 repo 固定版本谱系，回滚也引用同一 manifest。质量下降超过业务容忍或安全漏检非零即停止灰度；接受成本超过节省的评审分钟则降候选数。
 
 ## 面试考察本质
 

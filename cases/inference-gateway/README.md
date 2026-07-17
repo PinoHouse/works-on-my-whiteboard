@@ -26,7 +26,7 @@
 
 [DEDUCED:inference-gateway-deadline-and-fairness-require-explicit-scheduling] 吞吐最优的动态批处理可以持续拖延短截止期或低流量租户，deadline 与公平必须成为显式调度约束。若批处理器总选同模型以避免加载，热门模型请求持续到达时，冷门租户即使只有一个 100ms deadline 请求也可能永不执行；若总选最大 batch，长 prefill 又能阻塞交互解码。调度目标必须给 deadline slack、租户 token debt 和切换成本明确权重，并在不可能时准入前拒绝。
 
-[DEDUCED:inference-gateway-cancellation-requires-fenced-attempts] 取消只有在旧执行 attempt 被世代栅栏阻止继续生成、提交和计费时才完成，连接断开本身不是资源回收证明。事件序列：客户端断线，网关把状态标 canceled，但 worker 在网络分区内继续生成 2,000 token，稍后上传结果和计费。若 worker 没有设备/提交侧 epoch 校验，数据库标记不能停止资源。取消需推进 lease_epoch、向执行器传播并在输出与计费提交处 fence；契约同时给出有界停止时间。
+[DEDUCED:inference-gateway-cancellation-requires-fenced-attempts] 取消只有在旧执行 attempt 被世代栅栏阻止继续生成、提交和计费时才完成，连接断开本身不是资源回收证明。事件序列：客户端断线，网关把状态标 canceled，但 worker 在网络分区内继续生成 2,000 token。提交侧 epoch 只能丢弃输出，不能取回已经消耗的 GPU；因此执行器本地 watchdog 必须按签发的 deadline/epoch 强制停止 decode，并由 device owner ACK。拿不到 ACK 时要隔离该 worker、KV 与设备容量，不能仅等控制面租约时间后复用。
 
 ## 从简单方案演进
 
@@ -42,7 +42,7 @@
 
 请求进入后先鉴权并解析不可变 model_ref，tokenizer/preprocessor 计算输入工作量，admission ledger 原子扣除租户信用、并发和池级 KV/设备秒预留，失败则带可解释原因拒绝。路由只选已声明兼容的 runtime/hardware；scheduler 以 deadline slack、token debt、驻留代价和 batch 增益排序，连续批处理在安全边界加入/移除序列。
 
-worker 取得 attempt lease_epoch，输出和实际用量按 epoch/offset 条件追加。输出信用分段发放，到上限即以明确 finish_reason 终止。Cancel 推进 epoch 并等待执行器 ACK 或有界租约到期；此后旧 worker 的输出、用量和最终状态都被拒绝。幂等键相同且输入摘要相同返回原 attempt，不同摘要冲突；重试新采样创建新 attempt，不能拼接流。
+worker 取得带绝对 deadline 的 attempt lease_epoch，执行器本地 watchdog 在控制面失联时也会于 deadline、取消 epoch 或信用耗尽处停止 decode；输出和实际用量按 epoch/offset 条件追加。Cancel 推进 epoch，向 executor/device owner 下发 fence，并只在收到“执行已停、KV 已释放”的 ACK 后归还容量。若 ACK 不可达，控制面拒绝旧输出/计费但把整个 worker、KV 和对应设备份额置为隔离，不按时间推测它已停止。幂等键相同且输入摘要相同返回原 attempt；重试新采样创建新 attempt。
 
 过载先停止低优先离线批量，缩小可选输出上限和多候选，再对明确同意的请求切质量等级，最后拒绝；绝不静默换模型或越过租户隔离。完整记录 model/data adapter/prompt 或 preprocessing/tokenizer/runtime/batching/sampling 版本，用于质量与成本归因。固定这些仍不保证概率模型逐次一致。
 
@@ -50,9 +50,9 @@ worker 取得 attempt lease_epoch，输出和实际用量按 epoch/offset 条件
 
 SLI 按模型和租户观察 admission reject、排队、首输出、完成延迟、deadline miss、token throughput、准入后 OOM/驱逐、取消到 GPU 停止和公平 debt。质量侧对每个 model/runtime generation 跑固定任务指标和安全回归；成本看有效输出 token 的 GPU 秒、冷加载占比、padding/KV 浪费和取消后浪费。不能用总吞吐掩盖某租户饥饿。
 
-故障演练：t0 attempt A 以 epoch 7 在 worker W 执行；t1 客户端取消，ledger 推进到 8 并停止后续信用；t2 W 网络隔离仍生成；t3 新请求复用释放预算；t4 W 带 epoch 7 上传 offset 51 和用量，提交侧全部拒绝。演练测量取消到设备停算的最大时间，并验证释放预算前要有执行器 ACK 或保守租约到期，不能先超卖。
+故障演练：t0 attempt A 以 epoch 7 在 worker W 执行；t1 客户端取消，ledger 推进到 8 并停止后续信用；t2 W 网络隔离，本地 watchdog 到签发边界强制停 decode，但 ACK 暂时不可达；t3 控制面拒绝 epoch 7 输出和计费，同时隔离 W、其 KV 与设备预算，新请求不得复用；t4 device owner 恢复并确认进程停止、KV 清理后才释放容量。对照演练关闭 watchdog，应看到容量持续隔离而非仅凭租约到期超卖。
 
-模型升级先在固定版本输入和流量回放上比较质量、首输出、deadline miss 与单位 token 成本；灰度一次 attempt 固定 generation，回滚目录不改变进行中请求。定期演练模型冷加载风暴、热点租户和 adapter 越权。切换条件至少包括质量越过业务下限即回滚，以及冷加载占设备时间超过成本预算时增加驻留或拆池；数值需离线评测、压测和财务校准，本文不虚构结果。
+每次 release 绑定不可变 eval manifest：各模型任务/流量回放 digest、正确性与安全标签 digest、人工 rubric 或 judge version、准确率/deadline/fairness/成本指标实现版本。模型或调度升级只在同一 manifest 上比较任务质量、首输出、deadline miss 与单位 token 成本；数据或 judge 改版需新基线。灰度 attempt 和回滚目录都记录该 manifest。定期演练冷加载风暴、取消隔离和 adapter 越权；质量越过下限即回滚，冷加载成本越界则增加驻留或拆池。
 
 ## 面试考察本质
 

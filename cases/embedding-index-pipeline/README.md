@@ -14,11 +14,11 @@
 
 ## 客观模型
 
-接口包括 `Ingest(source_id, source_revision, operation)`、`StartBuild(config_digest, source_snapshot)`、`Publish(generation, expected_previous)` 与 `GetLineage(object_id, generation)`。处理谱系为 `source_revision → extractor_version → normalizer_version → chunker_version → tokenizer_version → embedding_model_digest/execution_profile → vector_space → index_generation`。chunk identity 由 source id、revision、稳定区间与 chunker version 导出，不能在切块策略变化后假装是同一对象。
+接口包括 `Ingest(source_id, source_revision, operation)`、`StartBuild(config_digest, source_snapshot, build_epoch)`、`Publish(generation, build_epoch, expected_previous)` 与 `GetLineage(object_id, generation)`。处理谱系为 `source_revision → extractor_version → normalizer_version → chunker_version → tokenizer_version → embedding_model_digest/execution_profile → vector_space → index_generation`。chunk identity 由 source id、revision、稳定区间与 chunker version 导出，不能在切块策略变化后假装是同一对象；每个 task attempt 另带只增不减的 `task_attempt_epoch`。
 
 设语料总 token 为 `T`，平均重叠比例 `r`，实际嵌入 token 约 `T/(1-r)`；每批 `B` token、模型吞吐 `q` token/s 时，理想回填时间下界约 `T/((1-r)*q*workers)`，还未计源读取、限流和失败。一次模型升级的字节/计算放大近似为全语料读取一次、嵌入推理一次、索引写一次，再乘副本与双代系数。少数超长文档、压缩包和高频更新对象会支配队列长尾。
 
-源系统拥有 revision 真值，任务账本拥有每个 `(source_revision, config_digest)` 的幂等状态，generation manifest 拥有查询路由的完整分片集合。关键不变量：query encoder 与索引文档向量的 compatibility key 必须一致；generation 只能在所有必需分片、watermark 和墓碑闭合后发布；相同输入任务重试不得产生两个逻辑可见版本；删除不得被迟到的旧 upsert 覆盖。版本化执行可以解释字节差异，但 GPU 并行浮点和下游生成仍可能非确定。
+源系统拥有 revision 真值，任务账本拥有每个 `(source_revision, config_digest)` 的幂等状态和当前 attempt epoch，build coordinator 拥有当前 build_epoch，generation manifest 拥有查询路由的完整分片集合。关键不变量：query encoder 与索引文档向量的 compatibility key 必须一致；只有当前 task/build epoch 能提交 vector、segment、manifest 和完成状态；generation 只能在所有必需分片、watermark 和墓碑闭合后发布；删除不得被迟到旧 upsert 覆盖。版本化执行可以解释字节差异，但 GPU 并行浮点和下游生成仍可能非确定。
 
 ## 必然约束
 
@@ -40,9 +40,9 @@
 
 ## 设计决定
 
-接入层按 source revision 读取不可变内容并把 upsert/delete 写入任务账本。任务键为 `(source_id, source_revision, config_digest)`；worker 取得租约，生成带摘要的 chunk 和向量，条件写入目标 generation。相同任务重试比较 digest 并幂等，旧 revision 晚到时因源版本条件失败。删除成为同序列的墓碑任务，不能被回填旧快照覆盖。
+接入层按 source revision 读取不可变内容并把 upsert/delete 写入任务账本。任务逻辑键为 `(source_id, source_revision, config_digest)`，每次领取租约都推进 `task_attempt_epoch`；worker 生成带摘要的 chunk 和向量，但所有 vector/segment 写、完成标记都必须同时匹配当前 task epoch 与当前 build_epoch。租约过期、取消或 coordinator 换主会推进 epoch，旧 attempt 即使 source revision/config 与新任务相同也不能再提交。相同 epoch 内重试比较 digest 并幂等，删除成为同序列的墓碑任务。
 
-每个 build 从固定 source snapshot 开始，manifest 列出配置 digest、compatibility key、所有 shard digest、source/change-log watermark 和删除水位。验证器确认分片完整、抽样 lineage 可回源、query encoder 已部署且质量/延迟门槛通过，目录才以 expected_previous CAS 发布。查询整次绑定 generation；切换失败保留旧代，不能逐 shard 修补线上目录。
+每个 build 从固定 source snapshot 开始，manifest 列出 build_epoch、配置 digest、compatibility key、所有 shard digest、source/change-log watermark 和删除水位。segment manifest、最终 manifest 与 READY completion 都按当前 build_epoch 条件提交；换主后旧 epoch 的“最后一个分片完成”不能提前封口。验证器确认分片完整、lineage 可回源、query encoder 已部署且质量/延迟门槛通过，目录才以 expected_previous CAS 发布。查询整次绑定 generation；切换失败保留旧代。
 
 过载先暂停实验性全量 build，再降低低优先租户回填并保护删除和增量；绝不跳过 lineage 或兼容检查。模型、数据、chunker、tokenizer、index builder 和 runtime 都记录版本。即使这些输入固定，GPU 浮点归约可能产生微小向量差异，下游模型输出更是概率性的，因此保证是可归因与质量边界，不是逐位复现。
 
@@ -50,9 +50,9 @@
 
 SLI 包括 source-to-searchable lag、各阶段 backlog age、任务重试/重复计费、generation 完整率、删除水位、lineage 断链；质量看与精确/标注集比较的 recall、chunk 覆盖和下游成功率；成本看每成功对象的源读取字节、嵌入 token、索引写放大与双代存储。所有指标按 config、generation、租户和文档长度分桶。
 
-故障时间线：t0 build G2 固定快照 R100；t1 源对象 X 在 R101 删除，change log 已记录；t2 回填 worker 基于 R100 迟到写 X；t3 删除任务以更高 revision 写墓碑；t4 G2 追平到 R105 并发布。条件写保证迟到 R100 不能越过 R101，manifest 的 delete watermark 未到 R105 前也不能 READY。随后模拟目录切换中断，CAS 要么仍指 G1，要么完整指 G2，不出现 A 分片 G2、B 分片 G1。
+故障时间线：t0 build G2/epoch 7 固定快照 R100；t1 worker W 租约过期，换主把 build 推到 epoch 8 并重派同一 source/config；t2 W 迟到上传 vector、segment 和 completion，全部因 epoch 7 被拒绝；t3 新 worker 在 epoch 8 处理 R101 删除并把墓碑水位追到 R105；t4 只有 epoch 8 manifest 可 READY。随后模拟目录切换中断，CAS 要么仍指 G1，要么完整指 G2，不出现混代分片。
 
-升级影子运行新 generation，以同一查询集比较 recall、业务成功、延迟和成本；灰度按请求绑定一代并保留一键回滚。定期演练源重放、worker 双执行、删除与目录故障。若质量下降超过业务设定百分点或单位嵌入成本超过升级收益，取消 build；若增量 lag 接近 SLO 的百分之八十，抢占全量容量。这些均为待离线评测、压测和业务校准的控制条件，不冒充已有结果。
+每个 release 绑定不可变 eval manifest：查询集与源快照 digest、相关文档/chunk 边界标签 digest、人工任务 rubric 或 judge version、recall/chunk-coverage/新鲜度指标实现版本。影子 generation 只有在同一 manifest 上比较 recall、下游成功、延迟和成本才可声称优劣；数据或 judge 改版先重建基线。灰度与回滚均记录该 manifest。定期演练旧 epoch 双写、删除与目录故障；质量下降或单位嵌入成本越界则取消 build，增量 lag 接近 SLO 的百分之八十则抢占全量容量。
 
 ## 面试考察本质
 
