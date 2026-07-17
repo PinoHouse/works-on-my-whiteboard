@@ -1,0 +1,21 @@
+schema_version: 1
+id: llm-chat-serving
+title: 大语言模型聊天服务
+primary_family: ai-vector
+required: true
+status: draft
+dimensions:
+  - problem-slo
+  - capacity-cost-skew
+  - contracts-data-invariants
+  - placement-routing-sharding
+  - consistency-ordering-time
+  - async-backpressure-fairness
+  - failure-recovery-disaster
+  - observability-release-evolution
+  - security-privacy-multitenancy
+claims:
+  - id: llm-chat-serving-token-budget-must-govern-admission
+    statement: 推理成本随输入与输出令牌数显著变化，只按请求数排队无法同时控制显存占用、公平性与尾延迟。
+  - id: llm-chat-serving-reproducibility-requires-versioned-provenance
+    statement: 概率生成的可复现性依赖模型、分词器、提示模板、采样参数与执行环境的联合版本，单独保存用户文本不足以解释输出差异。

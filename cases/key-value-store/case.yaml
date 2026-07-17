@@ -1,0 +1,22 @@
+schema_version: 1
+id: key-value-store
+title: 键值存储
+primary_family: distributed-storage
+required: true
+status: draft
+dimensions:
+  - problem-slo
+  - capacity-cost-skew
+  - contracts-data-invariants
+  - placement-routing-sharding
+  - consistency-ordering-time
+  - concurrency-transactions-idempotency
+  - cache-index-amplification
+  - failure-recovery-disaster
+  - observability-release-evolution
+  - security-privacy-multitenancy
+claims:
+  - id: key-value-store-acknowledgement-bounds-declared-durability
+    statement: 写入确认早于所声明故障范围内的足够副本持久化时，系统无法保证已确认值在该故障后仍可读取。
+  - id: key-value-store-partition-epoch-fences-stale-owners
+    statement: 分区迁移若没有单调纪元与旧所有者 fencing，旧新所有者就可能同时接受写入并产生不可线性化的版本历史。

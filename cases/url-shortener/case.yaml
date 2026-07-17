@@ -1,0 +1,21 @@
+schema_version: 1
+id: url-shortener
+title: 短链接服务
+primary_family: addressing-traffic
+required: true
+status: draft
+dimensions:
+  - problem-slo
+  - capacity-cost-skew
+  - contracts-data-invariants
+  - placement-routing-sharding
+  - consistency-ordering-time
+  - cache-index-amplification
+  - failure-recovery-disaster
+  - observability-release-evolution
+  - security-privacy-multitenancy
+claims:
+  - id: url-shortener-live-keyspace-determines-collision-cost
+    statement: 随机别名的碰撞概率由仍占用的键数量与可分配码空间之比决定，扩机器不能消除逼近饱和时的重试放大。
+  - id: url-shortener-mutability-requires-versioned-redirects
+    statement: 不可变短链可以长期缓存但无法原地纠错；可变短链必须以版本化更新和有界失效延迟换取目标可修改性。
