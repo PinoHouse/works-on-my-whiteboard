@@ -1,0 +1,25 @@
+schema_version: 1
+id: ride-hailing-dispatch
+title: 网约车调度
+primary_family: search-crawl-geo
+required: true
+status: draft
+dimensions:
+  - problem-slo
+  - capacity-cost-skew
+  - contracts-data-invariants
+  - placement-routing-sharding
+  - consistency-ordering-time
+  - concurrency-transactions-idempotency
+  - cache-index-amplification
+  - async-backpressure-fairness
+  - failure-recovery-disaster
+  - observability-release-evolution
+  - security-privacy-multitenancy
+claims:
+  - id: ride-hailing-dispatch-location-index-cannot-grant-driver-ownership
+    statement: 附近司机索引只能发现候选，不能授予司机所有权；最终分配必须由司机会话权威仲裁。
+  - id: ride-hailing-dispatch-acceptance-must-bind-driver-lease-epoch
+    statement: 接单必须在当前司机租约 epoch 下原子提交，否则超时 offer、断线重连和重复响应会把同一司机分给多单。
+  - id: ride-hailing-dispatch-radius-trades-recall-for-wait-and-deadhead
+    statement: 扩大候选半径提高匹配召回，却必然增加接驾等待与司机空驶，不能把找到司机等同于高质量派单。

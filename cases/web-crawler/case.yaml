@@ -1,0 +1,24 @@
+schema_version: 1
+id: web-crawler
+title: 网络爬虫
+primary_family: search-crawl-geo
+required: true
+status: draft
+dimensions:
+  - problem-slo
+  - capacity-cost-skew
+  - contracts-data-invariants
+  - placement-routing-sharding
+  - consistency-ordering-time
+  - cache-index-amplification
+  - async-backpressure-fairness
+  - failure-recovery-disaster
+  - observability-release-evolution
+  - security-privacy-multitenancy
+claims:
+  - id: web-crawler-frontier-claim-must-be-atomic
+    statement: 同一规范 URL 的到期任务必须由 frontier 原子声明，否则租约超时与重试会把重复抓取放大为外站负载。
+  - id: web-crawler-policy-must-be-checked-at-send-time
+    statement: robots 与主机礼貌间隔属于发送时约束，入队时检查不能阻止策略变更后已排队任务继续越界访问。
+  - id: web-crawler-url-identity-cannot-replace-content-version
+    statement: URL 身份既不能证明内容未变化，也不能识别不同 URL 的相同内容，抓取历史必须同时记录响应版本与内容摘要。

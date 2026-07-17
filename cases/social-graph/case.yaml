@@ -1,0 +1,24 @@
+schema_version: 1
+id: social-graph
+title: 社交图谱
+primary_family: search-crawl-geo
+required: true
+status: draft
+dimensions:
+  - problem-slo
+  - capacity-cost-skew
+  - contracts-data-invariants
+  - placement-routing-sharding
+  - consistency-ordering-time
+  - cache-index-amplification
+  - async-backpressure-fairness
+  - failure-recovery-disaster
+  - observability-release-evolution
+  - security-privacy-multitenancy
+claims:
+  - id: social-graph-edge-must-have-one-write-authority
+    statement: 一条关系边必须有唯一写权威和单调版本，否则双向副本在并发关注、拉黑与撤边时会产生不可判定冲突。
+  - id: social-graph-traversal-must-have-explicit-budget
+    statement: 高阶遍历的访问量随度数乘法增长，必须显式限制深度、访问节点数与超级节点展开数。
+  - id: social-graph-revocation-needs-generation-fence
+    statement: 隐私撤边必须推进可在读路径检查的代际栅栏，仅异步删除反向索引会在传播窗口继续暴露关系。

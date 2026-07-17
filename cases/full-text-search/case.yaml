@@ -1,0 +1,24 @@
+schema_version: 1
+id: full-text-search
+title: 全文搜索
+primary_family: search-crawl-geo
+required: true
+status: draft
+dimensions:
+  - problem-slo
+  - capacity-cost-skew
+  - contracts-data-invariants
+  - placement-routing-sharding
+  - consistency-ordering-time
+  - cache-index-amplification
+  - async-backpressure-fairness
+  - failure-recovery-disaster
+  - observability-release-evolution
+  - security-privacy-multitenancy
+claims:
+  - id: full-text-search-index-is-lagging-derived-state
+    statement: 倒排索引是权威文档的派生状态，刷新间隔内不可能同时获得零写放大、零查询协调与即时可见。
+  - id: full-text-search-pagination-must-pin-query-snapshot
+    statement: 游标必须固定索引与排序快照，否则 segment 发布和分数变化会让跨页结果重复或遗漏。
+  - id: full-text-search-acl-must-use-current-authorization
+    statement: 索引中的 ACL 只能加速候选过滤，最终返回必须受当前授权代际裁决以阻断撤权后的旧 posting。

@@ -1,0 +1,24 @@
+schema_version: 1
+id: nearby-places
+title: 附近地点
+primary_family: search-crawl-geo
+required: true
+status: draft
+dimensions:
+  - problem-slo
+  - capacity-cost-skew
+  - contracts-data-invariants
+  - placement-routing-sharding
+  - consistency-ordering-time
+  - cache-index-amplification
+  - async-backpressure-fairness
+  - failure-recovery-disaster
+  - observability-release-evolution
+  - security-privacy-multitenancy
+claims:
+  - id: nearby-places-spatial-index-only-produces-candidates
+    statement: 空间 cell 索引只能产生候选集合，边界与近似编码要求对候选执行精确距离计算后才能判定半径资格。
+  - id: nearby-places-location-age-must-enter-eligibility
+    statement: 移动地点或临时营业状态的时效必须进入资格判定，否则距离精确也会返回现实中已离开或已关闭的地点。
+  - id: nearby-places-filtering-requires-bounded-expansion
+    statement: 属性过滤会耗尽初始空间候选，系统只能通过有预算的扩圈或接受召回不足，不能免费保证固定数量结果。

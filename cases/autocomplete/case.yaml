@@ -1,0 +1,23 @@
+schema_version: 1
+id: autocomplete
+title: 自动补全
+primary_family: search-crawl-geo
+required: true
+status: draft
+dimensions:
+  - problem-slo
+  - capacity-cost-skew
+  - contracts-data-invariants
+  - consistency-ordering-time
+  - cache-index-amplification
+  - async-backpressure-fairness
+  - failure-recovery-disaster
+  - observability-release-evolution
+  - security-privacy-multitenancy
+claims:
+  - id: autocomplete-index-must-bind-corpus-and-policy-version
+    statement: 前缀候选必须绑定语料版本与资格策略版本，否则一次查询会混合已发布词条和已删除或禁止的旧候选。
+  - id: autocomplete-trend-and-baseline-need-different-windows
+    statement: 长期流行度与突发趋势的时间尺度不同，单一累计计数无法同时保持稳定相关性与快速响应。
+  - id: autocomplete-deletion-must-fence-derived-copies
+    statement: 隐私删除只有在所有可服务的 trie、缓存和回退版本都受删除代际栅栏约束后才真正生效。
