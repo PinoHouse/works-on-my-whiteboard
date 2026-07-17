@@ -16,7 +16,7 @@ dimensions:
   - security-privacy-multitenancy
 claims:
   - id: consistent-hash-router-generation-skew-can-create-dual-writers
-    statement: 一致性哈希仅在所有参与者使用同一成员快照时给出确定映射；generation 不一致时，对同一可写 key 的路由分歧会直接形成双 owner。
+    statement: generation 偏斜会把同一持久 key 送往旧、新 owner；只有旧 owner/quorum 已持久提交数据面 fence，且实际写仲裁拒绝低 token 后，目标 owner 才能开放写，控制面发布本身不能证明撤权。
   - id: consistent-hash-router-minimizes-membership-movement-not-load-skew
     statement: 一致性哈希限制单次成员变化的迁移比例，却不保证键大小、请求频率或热 key 均匀，热点仍可压垮一个 owner。
   - id: consistent-hash-router-vnode-count-trades-variance-for-control-plane-churn
