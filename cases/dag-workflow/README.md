@@ -2,29 +2,29 @@
 
 ## 表面题目
 
-设计 DAG 工作流系统，表面上是把任务节点和依赖边画成无环图，根节点完成后逐步调度下游。真正的成功语义是：某个不可变图版本的一次 workflow run 中，每个下游只消费本版本依赖的权威输出，重试、补跑和编辑不能混出一条从未存在过的执行路径。一个进程退出码为零，只能说明 attempt 结束，不能直接证明输出已经对下游可见。
+设计 DAG 工作流系统，表面上是把任务节点和依赖边画成无环图，根节点完成后逐步调度下游。真正的成功语义是：某个不可变图版本的一次 workflow run 中，每个下游只消费本 run 固定父提交集合推导出的权威输出；重试、补跑和编辑都不能改写原 run，或混出一条从未存在过的执行路径。一个进程退出码为零，只能说明 attempt 结束，不能直接证明输出已经对下游可见。
 
 本题区别于普通作业调度：核心不只是“何时触发”，而是依赖满足、关键路径、attempt 与 output commit。设计覆盖图发布、运行实例、动态重试、制品提交和取消；任务内部业务逻辑与大文件存储不在范围，但其提交身份必须参与协议。
 
 ## 反问与边界
 
-先问图是否在运行中可编辑，补跑单节点时下游是否自动失效，失败策略是 fail-fast、继续独立分支还是允许人工跳过。节点输出是小状态、表分区还是对象集合；下游要原子看到全部输出还是允许流式读取。还要确认最大节点数、扇出扇入、运行并发、关键路径 SLO、单任务时长、资源类型和租户公平性。
+先问图是否在运行中可编辑，补跑单节点时下游是否自动失效，以及补跑结果是只供审计、显式晋升还是自动成为默认结果；失败策略是 fail-fast、继续独立分支还是允许人工跳过。节点输出是小状态、表分区还是对象集合；下游要原子看到全部输出还是允许流式读取。还要确认最大节点数、扇出扇入、运行并发、关键路径 SLO、单任务时长、资源类型和租户公平性。
 
-期望状态是图版本、run 参数及每个 task instance 应达到的终态；观测状态包括依赖 commit、attempt epoch、worker lease、临时输出和资源使用。workflow reconciler 拥有 task readiness 与重试决策，artifact commit 记录拥有可见输出，worker 只拥有当前 attempt 的临时执行权。若图编辑改变语义，必须产生新 graph version，而不是原地改边后继续解释旧 run。
+期望状态是图版本、run 参数、derivation generation 及每个 task instance 应达到的终态；观测状态包括依赖 commit、attempt epoch、worker lease、临时输出和资源使用。workflow reconciler 拥有 task readiness、重试和派生补跑决策，artifact commit 记录拥有可见输出，worker 只拥有当前 attempt 的临时执行权。若图编辑改变语义，必须产生新 graph version；若补跑改变任一权威父输出，必须产生新 WorkflowRun/derivation generation，而不是原地改边或替换旧 run 的 commit。
 
 非目标是跨任意外部系统提供一个大事务。我们承诺状态机和输出引用一致；外部副作用需稳定 task identity、fencing 或补偿。SLO 分为 workflow 完成时间、关键路径排队、ready-to-start、失败确定时间和补跑成本，不能用全部节点平均时长掩盖一个慢扇入。
 
 ## 客观模型
 
-实体为 `GraphVersion(nodes, edges)`、`WorkflowRun(graph_version, run_epoch)`、`TaskInstance(task_id, dependency_versions, state)`、`Attempt(attempt_epoch, lease)` 和 `OutputCommit(manifest_digest, producer_epoch)`。状态为 `BLOCKED -> READY -> RUNNING(epoch) -> COMMITTED|FAILED|CANCELLED`。worker 先写以 `{run, task, epoch}` 命名的临时输出，再由条件 `CommitOutput` 原子发布 manifest 并把 task 标记完成；对象路径本身不是完成证据。
+实体为 `GraphVersion(nodes, edges)`、`WorkflowRun(run_id, graph_version, derivation_generation, original_inputs, parent_run)`、`TaskInstance(task_id, parent_commit_set, state)`、`Attempt(attempt_epoch, lease)` 和 `OutputCommit(manifest_digest, producer_epoch, run_generation)`。状态为 `BLOCKED -> READY -> RUNNING(epoch) -> COMMITTED|FAILED|CANCELLED`。worker 先写以 `{run, task, epoch}` 命名的临时输出，再由条件 `CommitOutput` 原子发布 manifest 并把 task 标记完成；对象路径本身不是完成证据。
 
 依赖计数由权威 output commit 驱动，事件可重复消费。对节点 `v`，最早完成下界是 `finish(v) ≥ max(finish(parent))+queue(v)+run(v)`；全图时间至少是最长路径权重。若每节点失败概率为 `q`、关键路径有 `k` 节点，不考虑重试时一次全过概率为 `(1-q)^k`。把非关键节点并行度从 10 加到 100 不改变串行关键路径，反而可能争抢其资源。
 
-不变量是同一 task instance 最多一个 output generation 成为权威；READY 必须对应固定 graph version 的全部依赖；下游输入 manifest 必须能追溯到具体父 task commit；旧 attempt 不能覆盖新 attempt 或删除其制品。旧 lease worker 返回时，临时对象保留到垃圾回收，状态和 manifest commit 因 epoch 不匹配而拒绝。
+不变量是原 WorkflowRun 及其 output commit 永远不可变，同一 `{run_generation, task}` 最多一个 output generation 成为权威；READY 必须对应固定 graph version、原始输入和完整父 commit 集；下游输入 manifest 必须能追溯到具体父 task commit。补跑创建新 run generation，按依赖闭包克隆或重算受影响子图，未受影响父输出只可按 digest 引用；旧 attempt 或旧 generation 不能向新 run 发布，也不能覆盖或删除其制品。
 
 ## 必然约束
 
-[DEDUCED:dag-workflow-readiness-must-bind-graph-version] 任务就绪必须绑定不可变图版本及全部依赖的权威完成版本，否则编辑、补跑与迟到事件会让下游消费不相容输出。反例是 v1 中 C 依赖 A、B；A 完成后用户发布删除 B 依赖的 v2，迟到的 A 事件让旧 C 被判 READY，再与 v2 参数运行。结果不属于 v1 或 v2。固定 run 的 graph version，并以父 output commit 集合判就绪才能复现。
+[DEDUCED:dag-workflow-readiness-must-bind-graph-version] 任务就绪必须绑定不可变图版本、run derivation generation 及全部父 output commit，否则编辑、补跑与迟到事件会让下游消费不相容输出。反例是原 run 中 A 发布 M1，C 消费 M1 后完成；用户补跑 A 得到 M2，若在原 run 中把 M1 替换为 M2，已完成 C 仍来自 M1，而后继却可能读取 M2，结果不属于任何可复现推导。补跑必须创建固定 graph version、原始输入和选定父 commit 的新 run generation，并让受影响的 C 及其后继随依赖闭包重算。
 
 [DEDUCED:dag-workflow-attempt-output-needs-an-authoritative-commit] attempt 写出临时文件不等于任务完成，只有当前 task epoch 的输出提交记录才能把一组制品原子暴露给下游。W1 写了 9/10 个分片后失租约，W2 重算全部十个；若下游按目录存在性扫描，会拼接 W1 与 W2。以 manifest digest 作为单一发布点且校验 producer epoch，可在对象存储弱列表语义下仍得到一组确定输入。
 
@@ -40,9 +40,11 @@
 
 ## 设计决定
 
-图发布做环检测并生成 content-addressed graph version。创建 workflow run 时固定版本与参数摘要。workflow reconciler 从权威 task/output 状态计算 desired readiness；调度器授予 task epoch 和 lease。worker 的所有输出写入 attempt namespace，完成时提交含输入版本、输出摘要和 producer epoch 的 manifest。只有当前 epoch 可将 task 转为 `COMMITTED`，随后幂等唤醒子节点。
+图发布做环检测并生成 content-addressed graph version。创建 workflow run 时固定版本、原始输入和参数摘要。workflow reconciler 从权威 task/output 状态计算 desired readiness；调度器授予 task epoch 和 lease。worker 的所有输出写入 attempt namespace，完成时提交含 run generation、父 commit 集、输出摘要和 producer epoch 的 manifest。只有当前 generation 的当前 epoch 可将 task 转为 `COMMITTED`，随后幂等唤醒子节点。
 
 worker 失租约后，新 worker 获更高 epoch。旧 worker 返回的完成和 checkpoint 被拒绝，临时输出按引用计数延迟回收；若旧 worker 已调用外部系统，使用 `{workflow_run, task, semantic_operation}` 稳定键查询或补偿，不能因 task 状态 FAILED 就断言副作用不存在。取消提高 run epoch，阻止新 commit；已提交父输出仍可审计，不向尚未开始节点发 claim。
+
+backfill/rerun 不修改原 run，而是创建新 `WorkflowRun` 和单调 `derivation_generation`，冻结 graph version、原始输入与明确选定的父 output commits。系统从被替换输出向下计算依赖闭包：受影响 task 克隆为新 task instance 并重算，未受影响父输出可按 manifest digest 引用；descendant 的 commit 条件同时比较新 generation 与父 commit 集。新 run 全部满足后，读者可显式选择它，或以 CAS 更新“默认结果”指针；校验失败、取消或反选只保留它供审计，默认仍指向原 run。
 
 反选是中心编排器内存维护整个 DAG，它的延迟低且代码简单；当图小、执行短、单进程重启可接受整图重跑时会重新变优。在长流程和人工介入场景，持久事实加可重算 reconcile 更符合恢复要求。
 
@@ -52,12 +54,14 @@ SLI 包括按 graph/run 的 ready lag、关键路径 queue time、attempt 重试
 
 故障演练：T0 W1 获 task X epoch 4；T1 写出九个分片后网络隔离；T2 lease 过期，W2 获 epoch 5 并提交 manifest M5；T3 子任务 Y 因 M5 READY；T4 W1 恢复写第十片并提交 M4。预期 M4 被拒绝，Y 的输入只含 M5，W1 对象最终清理。另一轮在父 commit 后、子唤醒前杀死 reconciler，重扫必须再次发现 READY 而不重复创建 task。
 
+补跑演练：T0 原 run R1 中 A 提交 M1；T1 C 以父集合 `{A:M1}` 提交 C1；T2 用户补跑 A，系统创建 R2/generation 2 并得到 M2，而不是在 R1 替换 M1；T3 依赖闭包把 C 克隆到 R2，C2 只能以 `{A:M2}` 提交，任何 R1 attempt 或 generation 1 commit 都被拒绝；T4 校验通过后 CAS 将默认结果从 R1 切到 R2。若校验失败或用户反选，默认仍为 R1，R2 仅供审计，绝不存在“R1 的 C1 配 R2 的 M2”。
+
 待演练指标一是 output commit 后子节点超过两分钟仍未 READY 的数量超过十条时触发全量依赖修复；二是临时输出超过权威输出的百分之二十或最老超过一天时加速 GC。阈值受对象成本和补跑诊断需求校准。图格式迁移先双读旧新版本；运行中的图永远按原版本解释。审计保存输入、参数、代码和输出摘要以支持复现。
 
 ## 面试考察本质
 
-给定“下游只能消费固定图版本中全部依赖的一个权威输出世代”这一不变量，因为任务完成通知会重复或丢失、worker 会失租约、对象写入与状态提交不原子，候选人应推导出不可变 graph version、attempt epoch、manifest commit 和可重算 readiness，并在并行利用率、关键路径延迟与重算成本间取舍。
+给定“下游只能消费固定 graph version、run derivation generation 与父 commit 集推导出的一个权威输出世代，原 run 不可被补跑改写”这一不变量，因为任务完成通知会重复或丢失、worker 会失租约、对象写入与状态提交不原子，候选人应推导出不可变 graph/run、attempt epoch、manifest commit、依赖闭包重算和显式结果切换，并在并行利用率、关键路径延迟与补跑成本间取舍。
 
-优秀信号是区分 process success、task commit 与 workflow completion，算出关键路径下界，明确旧 attempt 文件如何处理，并把外部副作用放入端到端身份。常见误区包括仅靠消息计数判断依赖完成、允许运行中直接改边、目录里有文件就启动下游，以及认为增加 worker 必然缩短 DAG。
+优秀信号是区分 process success、task commit 与 workflow completion，算出关键路径下界，明确旧 attempt 文件如何处理，并让 backfill 产生可审计的新推导。常见误区包括仅靠消息计数判断依赖完成、允许运行中直接改边或在原 run 替换父输出、目录里有文件就启动下游，以及认为增加 worker 必然缩短 DAG。
 
 二十分钟回答图版本、状态机和依赖；四十分钟加入 attempt/output commit、重试与关键路径；六十分钟再讨论动态映射、补跑失效、资源公平和制品 GC。最有区分度的追问是 W1 与 W2 都写出输出时谁能发布，以及这个决定如何被下游复现。

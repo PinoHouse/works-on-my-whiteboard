@@ -19,6 +19,6 @@ claims:
   - id: multi-tenant-cloud-control-plane-accepted-is-not-ready
     statement: API 接受只表示期望状态和 operation 已持久化，底层资源 provider 的异步事实未收敛前不能宣称资源 ready。
   - id: multi-tenant-cloud-control-plane-provider-effects-need-stable-identity
-    statement: 外部创建响应丢失时，重试必须携带稳定资源身份和 operation epoch，否则同一租户请求可能产生两个计费资源。
+    statement: provider 副作用需要稳定资源身份，并在其能力范围内把 generation fence 带到最终 apply；仅在 adapter 拒绝旧回执不能阻止已发出的旧 update/delete。
   - id: multi-tenant-cloud-control-plane-fairness-needs-per-tenant-admission
     statement: 全局队列会让单个大租户的扇出 saga 占满 worker 与 provider 配额，多租户控制面必须在入口和执行阶段都保留公平预算。
