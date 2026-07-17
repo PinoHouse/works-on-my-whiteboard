@@ -21,4 +21,4 @@ claims:
   - id: cloud-file-sync-path-is-not-a-stable-file-identity-under-rename
     statement: 路径会被重命名和复用；内容 generation 与目录 entry version 必须独立，rename 不能被误解为内容编辑或推进内容版本。
   - id: cloud-file-sync-convergence-requires-preserving-concurrent-history
-    statement: 设备未看见彼此操作时不存在共同顺序，从首个并发写开始就必须保留分支；冲突阈值只能控制呈现、合并和准入。
+    statement: 只有精确引用当前 head 才能推进该 head；基于严格祖先的写与现有 head 并发，必须保留分支，冲突阈值只能控制呈现、合并和准入。

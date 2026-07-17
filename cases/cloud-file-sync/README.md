@@ -14,9 +14,9 @@
 
 ## 客观模型
 
-设备保存 `{device_id, local_cursor, pending_operations, local_file_id_map}`；云端保存 `{file_id, content_generations, content_parent_edges, directory_entries(entry_version), operation_log, conflict_branches}`。稳定 `file_id` 标识逻辑文件，path 是带独立 `entry_version` 的目录 entry；不可变 `content_generation` 只在内容改变时产生，并携带内容父版本。云端操作日志拥有跨设备接受顺序，但不能抹去客户端未观察到的并发父关系。接口分为 `UploadContent`、`CommitContent(file_id,parent_content_generation,new_content_generation,op_id)`、`Rename(file_id,expected_entry_version,new_path,op_id)` 和 `Pull(cursor)`；rename 的 entry CAS 不推进内容 generation。
+设备保存 `{device_id, local_cursor, pending_operations, local_file_id_map}`；云端保存 `{file_id, content_generations, content_parent_edges, current_content_heads, directory_entries(entry_version), operation_log, conflict_branches}`。稳定 `file_id` 标识逻辑文件，path 是带独立 `entry_version` 的目录 entry；不可变 `content_generation` 只在内容改变时产生，并携带内容父版本。云端操作日志拥有跨设备接受顺序，但不能抹去客户端未观察到的并发父关系。接口分为 `UploadContent`、`CommitContent(file_id,parent_content_generation,new_content_generation,op_id)`、显式 `MergeContent(file_id,parent_head_generations,new_content_generation,op_id)`、`Rename(file_id,expected_entry_version,new_path,op_id)` 和 `Pull(cursor)`；rename 的 entry CAS 不推进内容 generation。
 
-不变量是：从首个非祖先关系的并发内容写开始，所有已云端接受的 content generation 都保留为分支，不得因冲突率低或后来上传而静默覆盖；同一路径最终指向明确一个 file_id 或显式冲突 entry；rename 只对预期 entry version 成功且不改变内容版本；重复 op_id 只应用一次；本地保存、云端接受与设备可见分别可查询。并发分支可由用户、确定合并函数或保留双方来收敛，但任何合并都必须引用输入内容父版本。
+不变量是：普通内容提交只有在 `parent_content_generation` 精确等于某个当前 head 时才能推进并替换该 head；若 parent 只是当前 head 的严格祖先，新 generation 与该 head 是并发兄弟，必须增加为另一 head 并保留原分支。只有显式 merge/rebase 同时引用将被替换的全部 heads，才可把它们收敛为一个新 head；不得因冲突率低或后来上传而静默覆盖。同一路径最终指向明确一个 file_id 或显式冲突 entry；rename 只对预期 entry version 成功且不改变内容版本；重复 op_id 只应用一次；本地保存、云端接受与设备可见分别可查询。
 
 若文件大小为 `B`、块大小 `c`、变化比例 `δ`、活跃设备 `D`，在没有额外压缩或跨设备复用、且其余 `D-1` 台设备都需要接收该变化时，单次内容更新的下行字节近似 `B×δ×(D-1)`，它不是普适下界；已有共享块、按需拉取或部分设备不订阅都会降低实际传输，协议元数据与加密则会增加开销。块数为 `ceil(B/c)`。若每 `T` 秒扫描 `F` 个文件，每设备检查率为 `F/T`；小文件多且实际变更少时，元数据扫描会压过有效传输。热点共享目录的冲突和日志 fan-out 不能用平均每用户设备数解释。
 
@@ -26,11 +26,11 @@
 
 [DEDUCED:cloud-file-sync-path-is-not-a-stable-file-identity-under-rename] 最小反例：初始 `file_id=17` 位于 entry version 20 的 `/team/plan.md`、content generation 5。A 离线编辑内容；B 用 `expected_entry_version=20` 把 17 改名为 `/team/plan-2026.md`，entry 前进到 21，但内容仍为 generation 5，并将新文件 `file_id=23` 放入旧路径。A 恢复后若只按 path 上传，就会覆盖 23。携带 `file_id=17,parent_content_generation=5` 可把内容附到正确身份；若 A 还重放旧目录动作，则独立的 entry CAS 因版本 20 过期而拒绝。内容父版本和目录 entry version 解决的是不同冲突，不能共用一个 generation。
 
-[DEDUCED:cloud-file-sync-convergence-requires-preserving-concurrent-history] A、B 都基于 content generation 8 离线修改，彼此不可见，因而不存在可证明的先后。无论这是系统遇到的第一次并发写，还是目录冲突率低于任何运营阈值，若服务端采用最后到达覆盖，另一个已云端接受的内容都会消失。版本图必须立即保留两个父为 8 的分支；文本可三方合并，二进制产生冲突副本，只有合并 generation 同时引用两分支后才有可解释的收敛点。墙钟更大也不能证明因果顺序。
+[DEDUCED:cloud-file-sync-convergence-requires-preserving-concurrent-history] A、B 都基于 content generation 8 离线修改，彼此不可见，因而不存在可证明的先后。无论这是系统遇到的第一次并发写，还是目录冲突率低于任何运营阈值，若服务端采用最后到达覆盖，另一个已云端接受的内容都会消失。版本图必须立即保留两个父为 8 的分支；即使某客户端在当前 head 已推进到 10 后才提交以严格祖先 8 为 parent 的新内容，它与 10 仍是并发兄弟而非可快进更新。文本可三方合并，二进制产生冲突副本，只有显式合并 generation 同时引用要收敛的所有 heads 后才有可解释的收敛点。墙钟更大也不能证明因果顺序。
 
 ## 从简单方案演进
 
-最简单正确基线是单设备文件夹加周期全盘扫描：本地保存可靠，云端只接受带内容哈希的整文件上传，不涉及并发。第二台可写设备加入时，就引入稳定 file_id、内容父 generation、独立目录 entry version、云端操作日志和游标；任意非祖先内容提交从第一次发生起即保留冲突分支。块级去重只在大文件变化少、重传成本成为主瓶颈时加入，而不是正确性的前提。
+最简单正确基线是单设备文件夹加周期全盘扫描：本地保存可靠，云端只接受带内容哈希的整文件上传，不涉及并发。第二台可写设备加入时，就引入稳定 file_id、内容父 generation、当前 head 集合、独立目录 entry version、云端操作日志和游标；普通提交仅可推进与 parent 精确相等的当前 head，基于严格祖先或其他未观察分支的提交从第一次发生起即保留为并发 head。块级去重只在大文件变化少、重传成本成为主瓶颈时加入，而不是正确性的前提。
 
 第一个**待校准**切换指标是：完整目录扫描耗时超过同步新鲜度目标的百分之五十，或端点扫描 I/O 连续十五分钟超过本地预算百分之五时，切到文件系统事件加云端日志 cursor，并保留低频补扫检测漏事件。百分之五十、百分之五和补扫周期要按设备电量、事件可靠性与目录规模校准；事件化降低扫描，却新增游标断档和平台差异。
 
@@ -40,7 +40,7 @@
 
 ## 设计决定
 
-本设计让设备首次发现文件时分配稳定 file_id，并把本地路径作为有独立版本的目录 entry。内容分块上传形成不可变 content generation；`CommitContent` 必须携带 `op_id,file_id,parent_content_generation`，父与当前内容头相同则前进，父为祖先可按规则快进，非祖先并发关系则从第一次出现起保留冲突分支。`Rename` 单独携带 `op_id,file_id,expected_entry_version,new_path` 做目录 CAS，成功只推进 entry version，不改变内容头。两类操作接受后都写 server cursor；其他设备拉取并应用后分别上报自己的可见 cursor。
+本设计让设备首次发现文件时分配稳定 file_id，并把本地路径作为有独立版本的目录 entry。内容分块上传形成不可变 content generation；`CommitContent` 携带 `op_id,file_id,parent_content_generation` 并对内容 head 集合做 CAS：只有 parent 精确等于某个当前 head，才以新 generation 替换并推进该 head；parent 若只是某个当前 head 的严格祖先，新 generation 与现有 head 是并发兄弟，服务端接受时新增 head 而不得移除现有分支。显式 merge/rebase 必须在同一次原子提交中引用要被合并的所有当前 heads，成功后才以合并 generation 替换它们。`Rename` 单独携带 `op_id,file_id,expected_entry_version,new_path` 做 entry CAS，成功只推进 entry version，不改变内容 heads。两类操作接受后都写 server cursor；其他设备拉取并应用后分别上报自己的可见 cursor。
 
 上传 part 与操作都幂等，超时重试同一身份。平台事件乱序或丢失由周期补扫和内容哈希修正。删除是版本化 tombstone，离线设备上传旧内容时形成恢复分支而非无条件复活路径。过载时先延迟缩略图和低优先级预取，限制大文件并发，再按目录公平同步元数据；不能丢弃冲突操作来让队列看似变短。
 
@@ -50,14 +50,14 @@
 
 SLI 按确认域分别统计本地待上传年龄、内容条件提交、entry CAS 冲突、设备 cursor 落后、端到端可见延迟、冲突分支数、静默覆盖检测、扫描 I/O、块去重率和租户日志积压。用户可看到“仅本机”“已到云端”“设备 B 尚未同步”。过载时优先传播删除、权限和目录元数据，再传小文件与活跃内容，最后传历史大文件；公平调度防止一个大视频阻塞整个目录。
 
-故障演练时间线：零毫秒 A、B 均有 content generation 12 和 entry version 30；A 离线编辑为 13A 并本地保存；B 同时编辑内容为 13B，并用 entry CAS 把文件改名，entry 前进到 31。这里的 13B 来自 B 的内容编辑，不是 rename。A 一小时后提交 `parent_content_generation=12`，服务从第一次冲突起保留 13A、13B 两分支；A 重放基于 entry version 30 的旧路径动作则被拒绝，不覆盖 B 的改名。用户合并内容为 generation 14，引用 13A、13B，而目录仍保持 version 31 的新路径。演练同时拔掉 A 磁盘，验证只有标为云端成功的内容可恢复。
+故障演练时间线：零毫秒 A、B 均有 content generation 12 和 entry version 30；A 离线编辑为 13A 并本地保存；B 同时编辑内容为 13B，并用 entry CAS 把文件改名，entry 前进到 31。这里的 13B 来自 B 的内容编辑，不是 rename。B 先提交并让当前 head 从 12 推进到 13B；A 一小时后提交 `parent_content_generation=12` 时，12 已只是 13B 的严格祖先，故服务新增 13A head 并保留 13B，不得把它当快进覆盖。A 重放基于 entry version 30 的旧路径动作则被拒绝，不覆盖 B 的改名。用户显式合并内容为 generation 14，在同一提交中引用当前 heads 13A、13B，而目录仍保持 version 31 的新路径。演练同时拔掉 A 磁盘，验证只有标为云端成功的内容可恢复。
 
 协议升级先让客户端分别透传 content generation 与 entry version，再让新客户端产生版本图并使用目录 CAS，最后停止旧 path-only 提交；旧客户端请求通过网关转换但遇到歧义必须冲突，不能猜测身份。回滚保留读取新分支和 entry 版本。端到端加密时服务端只能比较密文身份和父关系，内容合并下放客户端。撤权先阻止新操作，再轮换共享密钥；历史设备副本的删除属于独立安全契约，不能由同步成功自动证明。
 
 ## 面试考察本质
 
-这题考察的是：给定“从首个并发写起不静默丢失已接受内容、路径改名后仍识别同一文件”的不变量，因为离线设备不知道其他设备的并发历史，候选人能否区分本地保存、云端接受和多端可见，分离 content generation 与目录 entry CAS，并让冲突阈值只控制 UI、合并和准入成本。
+这题考察的是：给定“只有精确引用当前 head 才能推进该 head，基于严格祖先的写必须保留为并发分支，路径改名后仍识别同一文件”的不变量，因为离线设备不知道其他设备的并发历史，候选人能否区分本地保存、云端接受和多端可见，分离 CommitContent 的内容 head CAS 与 Rename 的目录 entry CAS，并让冲突阈值只控制 UI、合并和准入成本。
 
-优秀回答会先画三种确认状态，使用 file_id 而非 path，给出改名加路径复用的最小反例，说明 rename 不推进内容 generation，并从首个并发写保存版本图。常见误区是只谈分块去重、等冲突率越线才停止覆盖、以服务器时间最后写胜、把文件系统事件当绝不丢失，或把 `B×δ×(D-1)` 无条件称为传输下界。
+优秀回答会先画三种确认状态，使用 file_id 而非 path，给出改名加路径复用的最小反例，说明 rename 不推进内容 generation、严格祖先不是可快进 parent，并从首个并发写保存版本图；显式 merge/rebase 必须同时引用被收敛的 heads。常见误区是只谈分块去重、等冲突率越线才停止覆盖、以服务器时间最后写胜、把文件系统事件当绝不丢失，或把 `B×δ×(D-1)` 无条件称为传输下界。
 
-二十分钟完成设备、云端状态和保存/同步语义；四十分钟加入稳定身份、游标、版本图与冲突；六十分钟再讨论块传播、跨平台路径、加密、撤权和升级。追问应落在具体设备离线期间：它知道哪些父版本，重连操作绑定哪个 file_id，云端为何有权接受或分叉，以及用户在哪个确认状态下可以安全丢弃本机。
+二十分钟完成设备、云端状态和保存/同步语义；四十分钟加入稳定身份、游标、版本图与冲突；六十分钟再讨论块传播、跨平台路径、加密、撤权和升级。追问应落在具体设备离线期间：它知道哪些父版本，重连操作绑定哪个 file_id，parent 是否仍精确等于当前 head，云端为何只能推进或分叉，以及用户在哪个确认状态下可以安全丢弃本机。
