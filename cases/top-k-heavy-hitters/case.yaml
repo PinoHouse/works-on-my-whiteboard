@@ -1,0 +1,22 @@
+schema_version: 1
+id: top-k-heavy-hitters
+title: Top-K 与高频项统计
+primary_family: feed-social-ranking
+required: true
+status: draft
+dimensions:
+  - problem-slo
+  - capacity-cost-skew
+  - contracts-data-invariants
+  - consistency-ordering-time
+  - cache-index-amplification
+  - async-backpressure-fairness
+  - failure-recovery-disaster
+  - observability-release-evolution
+claims:
+  - id: top-k-heavy-hitters-rank-is-an-estimate-with-window-and-error-semantics
+    statement: Top-K 是带窗口、过滤版本和误差界的派生估计，不是事件日志的权威顺序。
+  - id: top-k-heavy-hitters-approximation-cannot-resolve-near-boundary-order
+    statement: 当第 K 与第 K+1 项的真实差距不超过估计误差时，近似结构不能保证严格先后。
+  - id: top-k-heavy-hitters-deduplication-horizon-bounds-replay-correctness
+    statement: 去重状态回收后重放旧事件无法再区分首次与重复，重放正确性因此受去重时间范围约束。

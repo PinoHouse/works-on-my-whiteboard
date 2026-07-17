@@ -1,0 +1,24 @@
+schema_version: 1
+id: comments-reactions
+title: 评论与互动
+primary_family: feed-social-ranking
+required: true
+status: draft
+dimensions:
+  - problem-slo
+  - capacity-cost-skew
+  - contracts-data-invariants
+  - consistency-ordering-time
+  - concurrency-transactions-idempotency
+  - cache-index-amplification
+  - async-backpressure-fairness
+  - failure-recovery-disaster
+  - observability-release-evolution
+  - security-privacy-multitenancy
+claims:
+  - id: comments-reactions-membership-is-authoritative-and-counter-is-derived
+    statement: 某用户是否点赞由唯一关系状态裁决，公开计数只是可重建的派生聚合。
+  - id: comments-reactions-thread-order-is-local-to-a-thread-not-a-global-social-order
+    statement: 评论创建序只在同一线程内权威可比，跨帖热评顺序是派生展示。
+  - id: comments-reactions-moderation-version-must-fence-late-edits-and-cache-fills
+    statement: 删除或封禁后的迟到编辑与缓存填充必须被审核版本阻挡，不能重新暴露正文。

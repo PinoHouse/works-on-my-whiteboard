@@ -1,0 +1,22 @@
+schema_version: 1
+id: recommendation-system
+title: 推荐系统
+primary_family: feed-social-ranking
+required: true
+status: draft
+dimensions:
+  - problem-slo
+  - capacity-cost-skew
+  - contracts-data-invariants
+  - cache-index-amplification
+  - async-backpressure-fairness
+  - failure-recovery-disaster
+  - observability-release-evolution
+  - security-privacy-multitenancy
+claims:
+  - id: recommendation-system-eligibility-is-authoritative-while-model-rank-is-derived
+    statement: 模型只能在当前合格候选中派生排序，不能覆盖删除、库存、授权或用户屏蔽等硬资格。
+  - id: recommendation-system-offline-model-freshness-does-not-imply-online-feature-freshness
+    statement: 训练截止时间新不代表在线库存、隐私和反馈新，模型与在线特征延迟必须分别治理。
+  - id: recommendation-system-exploration-requires-an-explicit-user-and-tenant-budget
+    statement: 探索会分配曝光与风险，必须受用户、供给方和租户预算约束而不能只追求总体点击率。

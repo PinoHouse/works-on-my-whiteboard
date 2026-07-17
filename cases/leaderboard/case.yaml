@@ -1,0 +1,24 @@
+schema_version: 1
+id: leaderboard
+title: 排行榜
+primary_family: feed-social-ranking
+required: true
+status: draft
+dimensions:
+  - problem-slo
+  - capacity-cost-skew
+  - contracts-data-invariants
+  - placement-routing-sharding
+  - consistency-ordering-time
+  - concurrency-transactions-idempotency
+  - cache-index-amplification
+  - failure-recovery-disaster
+  - observability-release-evolution
+  - security-privacy-multitenancy
+claims:
+  - id: leaderboard-live-rank-is-derived-while-prize-rank-requires-a-frozen-authority
+    statement: 实时名次是可滞后的派生视图，奖金名次必须由带规则版本和关闭纪元的冻结快照裁决。
+  - id: leaderboard-score-event-idempotency-precedes-rank-maintenance
+    statement: 计分事件先做到幂等并可重放，才能可靠维护和重建排名。
+  - id: leaderboard-tie-breaker-is-part-of-the-ordering-contract
+    statement: 同分时的稳定决胜键属于排序契约，否则不同副本可以给出不同的第 N 名。

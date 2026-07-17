@@ -1,0 +1,22 @@
+schema_version: 1
+id: photo-sharing
+title: 图片分享
+primary_family: feed-social-ranking
+required: true
+status: draft
+dimensions:
+  - problem-slo
+  - capacity-cost-skew
+  - contracts-data-invariants
+  - cache-index-amplification
+  - async-backpressure-fairness
+  - failure-recovery-disaster
+  - security-privacy-multitenancy
+  - observability-release-evolution
+claims:
+  - id: photo-sharing-rendered-bytes-must-bind-to-an-immutable-source-digest
+    statement: 派生图片必须绑定不可变源对象摘要和隐私版本，否则旧任务可在重传或撤回后覆盖当前结果。
+  - id: photo-sharing-thumbnail-cache-is-not-an-authorization-authority
+    statement: 缩略图或 CDN 命中只证明字节存在，不能证明当前用户仍被授权查看。
+  - id: photo-sharing-derivative-count-not-follower-count-dominates-upload-amplification
+    statement: 图片上传的主要写放大由尺寸、编码、审核和索引派生数决定，而不是关注者数量。

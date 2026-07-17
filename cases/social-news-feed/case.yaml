@@ -1,0 +1,24 @@
+schema_version: 1
+id: social-news-feed
+title: 社交信息流
+primary_family: feed-social-ranking
+required: true
+status: draft
+dimensions:
+  - problem-slo
+  - capacity-cost-skew
+  - contracts-data-invariants
+  - placement-routing-sharding
+  - consistency-ordering-time
+  - cache-index-amplification
+  - async-backpressure-fairness
+  - failure-recovery-disaster
+  - observability-release-evolution
+  - security-privacy-multitenancy
+claims:
+  - id: social-news-feed-home-order-is-derived-not-a-global-publish-log
+    statement: 跨作者首页顺序是对当前可见候选的派生排序，不能充当全局发布日志或审计顺序。
+  - id: social-news-feed-celebrity-skew-makes-unconditional-write-fanout-unbounded
+    statement: 对所有作者同步全量写时扇出会让单帖工作量由关注者偏斜决定，平均用户容量无法约束名人峰值。
+  - id: social-news-feed-visibility-must-be-checked-after-materialized-candidate-delivery
+    statement: 候选 ID 已物化不代表读取时仍有权限，删除、拉黑和关系变化后必须在权威可见性边界复核。

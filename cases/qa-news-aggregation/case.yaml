@@ -1,0 +1,23 @@
+schema_version: 1
+id: qa-news-aggregation
+title: 问答与新闻聚合
+primary_family: feed-social-ranking
+required: true
+status: draft
+dimensions:
+  - problem-slo
+  - capacity-cost-skew
+  - contracts-data-invariants
+  - consistency-ordering-time
+  - cache-index-amplification
+  - async-backpressure-fairness
+  - failure-recovery-disaster
+  - observability-release-evolution
+  - security-privacy-multitenancy
+claims:
+  - id: qa-news-aggregation-accepted-answer-is-authoritative-while-hotness-is-derived
+    statement: 题主或版主的接受状态是有权限的裁决，票数、时效和模型热度只能派生排序。
+  - id: qa-news-aggregation-canonicalization-is-a-fallible-decision-not-a-lossless-key
+    statement: URL、标题或向量相似不能证明两个来源是同一事实，聚类边必须可追溯、可拆分。
+  - id: qa-news-aggregation-event-time-and-ingest-time-must-remain-separate
+    statement: 来源声称的事件时间与系统抓取时间必须分别保存，否则晚到旧闻会被伪装为新事件。
