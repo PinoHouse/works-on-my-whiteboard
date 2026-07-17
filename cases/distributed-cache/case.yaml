@@ -8,6 +8,7 @@ dimensions:
   - problem-slo
   - capacity-cost-skew
   - contracts-data-invariants
+  - placement-routing-sharding
   - consistency-ordering-time
   - concurrency-transactions-idempotency
   - cache-index-amplification

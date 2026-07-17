@@ -19,6 +19,6 @@ claims:
   - id: cloud-file-sync-save-and-sync-acknowledgements-name-different-durability-domains
     statement: 本地持久化、云端接受操作和其他设备可见是三个不同状态，合并为一个保存成功会使断网、重试和用户期望不可解释。
   - id: cloud-file-sync-path-is-not-a-stable-file-identity-under-rename
-    statement: 路径会被重命名和复用，以路径作为离线修改的唯一前提会把编辑旧文件误解释为覆盖新路径对象。
+    statement: 路径会被重命名和复用；内容 generation 与目录 entry version 必须独立，rename 不能被误解为内容编辑或推进内容版本。
   - id: cloud-file-sync-convergence-requires-preserving-concurrent-history
-    statement: 设备未看见彼此操作时不存在共同顺序，服务端按最后到达者覆盖会让网络时序决定已确认内容是否丢失。
+    statement: 设备未看见彼此操作时不存在共同顺序，从首个并发写开始就必须保留分支；冲突阈值只能控制呈现、合并和准入。

@@ -10,6 +10,7 @@ dimensions:
   - contracts-data-invariants
   - placement-routing-sharding
   - consistency-ordering-time
+  - concurrency-transactions-idempotency
   - cache-index-amplification
   - async-backpressure-fairness
   - failure-recovery-disaster
@@ -21,4 +22,4 @@ claims:
   - id: time-series-database-ingest-acknowledgement-must-bind-deduplication-and-durability
     statement: 网络超时后的重发无法判断首写是否成功；缺少样本身份规则和 WAL 耐久边界，系统不能同时避免丢样与重复计数。
   - id: time-series-database-window-finality-depends-on-a-lateness-bound
-    statement: 乱序样本可能在窗口首次计算后到达，未声明最大允许晚到或修正语义时，聚合结果没有可解释的最终边界。
+    statement: 乱序样本可能在窗口首次计算后到达；只有跨相关分片 watermark 越过窗口末端，且迟到样本被拒绝或进入版本化回填，聚合结果才有可解释的最终边界。

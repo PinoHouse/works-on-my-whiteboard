@@ -17,8 +17,8 @@ dimensions:
   - security-privacy-multitenancy
 claims:
   - id: wide-column-document-store-partition-key-bounds-write-coordination
-    statement: 需要条件原子性的字段只有位于同一权威分区，系统才能用一个分区的副本协议仲裁更新；跨分区查询不免费继承此原子性。
+    statement: 需要条件原子性的字段只有位于同一权威分区，系统才能用 leader 共识或 LWT 仲裁更新；普通 quorum 与跨分区查询不免费继承此原子性。
   - id: wide-column-document-store-tombstone-retention-protects-against-stale-replica-resurrection
-    statement: 删除证据在所有旧副本不再可能携带被删值之前被清除，后续修复便无法区分旧值与新写，数据可能复活。
+    statement: 墓碑必须覆盖仍有资格重入的副本及其修复周期；超期副本只能剔除并全量重建，备份恢复也必须在新 restore epoch 重放删除记录。
   - id: wide-column-document-store-indexes-turn-write-cost-into-query-latency-budget
     statement: 二级索引为每次写增加索引副本与压实工作，其数量和基数决定查询便利能否留在写入预算内。
