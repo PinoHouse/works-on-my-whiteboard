@@ -1,0 +1,23 @@
+schema_version: 1
+id: distributed-cache
+title: 分布式缓存
+primary_family: distributed-storage
+required: true
+status: draft
+dimensions:
+  - problem-slo
+  - capacity-cost-skew
+  - contracts-data-invariants
+  - consistency-ordering-time
+  - concurrency-transactions-idempotency
+  - cache-index-amplification
+  - failure-recovery-disaster
+  - observability-release-evolution
+  - security-privacy-multitenancy
+claims:
+  - id: distributed-cache-hit-does-not-establish-freshness
+    statement: 缓存命中只证明本地存在未淘汰副本；没有来源版本比较或失效确认时，命中不能推出它等于主存当前值。
+  - id: distributed-cache-write-success-must-name-the-visibility-boundary
+    statement: 写入确认主存成功而不说明缓存失效传播或会话绕过规则时，系统无法同时声明写成功和随后读取最新值。
+  - id: distributed-cache-hot-key-expiry-amplifies-origin-load
+    statement: 同一热键的独立过期会把一个可共享的回源结果放大为并发未命中；增加缓存节点不消除此时刻的主存压力。

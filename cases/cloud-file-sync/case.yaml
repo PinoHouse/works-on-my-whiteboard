@@ -1,0 +1,24 @@
+schema_version: 1
+id: cloud-file-sync
+title: 云文件同步
+primary_family: distributed-storage
+required: true
+status: draft
+dimensions:
+  - problem-slo
+  - capacity-cost-skew
+  - contracts-data-invariants
+  - consistency-ordering-time
+  - concurrency-transactions-idempotency
+  - cache-index-amplification
+  - async-backpressure-fairness
+  - failure-recovery-disaster
+  - observability-release-evolution
+  - security-privacy-multitenancy
+claims:
+  - id: cloud-file-sync-save-and-sync-acknowledgements-name-different-durability-domains
+    statement: 本地持久化、云端接受操作和其他设备可见是三个不同状态，合并为一个保存成功会使断网、重试和用户期望不可解释。
+  - id: cloud-file-sync-path-is-not-a-stable-file-identity-under-rename
+    statement: 路径会被重命名和复用，以路径作为离线修改的唯一前提会把编辑旧文件误解释为覆盖新路径对象。
+  - id: cloud-file-sync-convergence-requires-preserving-concurrent-history
+    statement: 设备未看见彼此操作时不存在共同顺序，服务端按最后到达者覆盖会让网络时序决定已确认内容是否丢失。

@@ -1,0 +1,24 @@
+schema_version: 1
+id: time-series-database
+title: 时序数据库
+primary_family: distributed-storage
+required: true
+status: draft
+dimensions:
+  - problem-slo
+  - capacity-cost-skew
+  - contracts-data-invariants
+  - placement-routing-sharding
+  - consistency-ordering-time
+  - cache-index-amplification
+  - async-backpressure-fairness
+  - failure-recovery-disaster
+  - observability-release-evolution
+  - security-privacy-multitenancy
+claims:
+  - id: time-series-database-label-cardinality-is-a-state-allocation-commitment
+    statement: 每个新标签组合都要求索引和 head 为一条新序列分配状态，它不是普通字段过滤，接收后才发现基数越界已经过晚。
+  - id: time-series-database-ingest-acknowledgement-must-bind-deduplication-and-durability
+    statement: 网络超时后的重发无法判断首写是否成功；缺少样本身份规则和 WAL 耐久边界，系统不能同时避免丢样与重复计数。
+  - id: time-series-database-window-finality-depends-on-a-lateness-bound
+    statement: 乱序样本可能在窗口首次计算后到达，未声明最大允许晚到或修正语义时，聚合结果没有可解释的最终边界。

@@ -1,0 +1,24 @@
+schema_version: 1
+id: distributed-sql
+title: 分布式 SQL 数据库
+primary_family: distributed-storage
+required: true
+status: draft
+dimensions:
+  - problem-slo
+  - capacity-cost-skew
+  - contracts-data-invariants
+  - placement-routing-sharding
+  - consistency-ordering-time
+  - concurrency-transactions-idempotency
+  - cache-index-amplification
+  - failure-recovery-disaster
+  - observability-release-evolution
+  - security-privacy-multitenancy
+claims:
+  - id: distributed-sql-commit-acknowledgement-bounds-transaction-durability
+    statement: 客户端在任一参与范围达到声明副本持久化之前收到提交成功，该范围的后续故障就可能使已提交事务缺少部分写集。
+  - id: distributed-sql-cross-range-atomicity-requires-a-recoverable-decision-record
+    statement: 协调器故障时，仅凭参与者的局部准备状态无法区分全局提交与中止；原子恢复需要可恢复决定及确定的解析规则。
+  - id: distributed-sql-participant-count-amplifies-commit-tail-latency
+    statement: 原子提交必须等待最慢必要参与者，范围数增加会同时放大网络往返、共识排队与冲突概率。

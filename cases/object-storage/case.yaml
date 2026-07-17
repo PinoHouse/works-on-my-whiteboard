@@ -1,0 +1,24 @@
+schema_version: 1
+id: object-storage
+title: 对象存储
+primary_family: distributed-storage
+required: true
+status: draft
+dimensions:
+  - problem-slo
+  - capacity-cost-skew
+  - contracts-data-invariants
+  - placement-routing-sharding
+  - consistency-ordering-time
+  - cache-index-amplification
+  - async-backpressure-fairness
+  - failure-recovery-disaster
+  - observability-release-evolution
+  - security-privacy-multitenancy
+claims:
+  - id: object-storage-object-ack-must-mean-a-complete-checksummed-generation
+    statement: 对象成功确认若只代表部分字节落盘，读取方就无法区分网络中断的截断对象与完整对象，完整读取契约无法成立。
+  - id: object-storage-manifest-commit-separates-data-transfer-from-visible-publication
+    statement: 块传输与对象名发布分离后，上传重试只产生不可见暂存数据；缺少原子 manifest 切换会使读取观察到混合分片。
+  - id: object-storage-redundancy-choice-trades-capacity-for-small-read-and-repair-work
+    statement: 复制与纠删码都提高可恢复性，纠删码以较低容量开销换取更多分片读取、编码和故障修复协调。
