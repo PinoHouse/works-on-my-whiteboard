@@ -19,6 +19,6 @@ claims:
   - id: centralized-logging-searchability-is-a-retention-contract
     statement: 日志可搜索性依赖原始段、索引版本、保留期和授权策略共同存活。
   - id: centralized-logging-ingest-ack-bounds-loss-semantics
-    statement: 中央持久确认前丢弃本地缓冲会把网络分区变成不可辨识的数据洞。
+    statement: 中央持久确认前丢弃本地缓冲会制造数据洞，去重还必须包含租户和可 fencing 的持久 source epoch，避免重装后的新日志被当成旧重复。
   - id: centralized-logging-index-is-derived-from-immutable-records
     statement: 搜索索引可以延迟或重建，但不能替代不可变原始记录作为证据权威。
