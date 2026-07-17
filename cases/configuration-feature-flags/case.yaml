@@ -1,0 +1,22 @@
+schema_version: 1
+id: configuration-feature-flags
+title: 配置与功能开关
+primary_family: scheduling-control-plane
+required: true
+status: draft
+dimensions:
+  - problem-slo
+  - capacity-cost-skew
+  - contracts-data-invariants
+  - consistency-ordering-time
+  - cache-index-amplification
+  - failure-recovery-disaster
+  - observability-release-evolution
+  - security-privacy-multitenancy
+claims:
+  - id: configuration-feature-flags-evaluation-needs-one-policy-snapshot
+    statement: 一次请求的开关求值必须绑定一个不可变策略快照，否则规则、分群与默认值跨版本混用会产生任何发布版本都不存在的决定。
+  - id: configuration-feature-flags-deny-freshness-trades-offline-availability
+    statement: 客户端离线缓存越久越可用，紧急撤权和 kill switch 生效越慢；强制 deny freshness 必须付出在线检查、短租约或停止服务的代价。
+  - id: configuration-feature-flags-expired-publisher-cannot-advance-head
+    statement: 发布者租约过期后生成的快照可留作审计，但只有更高 publish epoch 能推进租户当前版本指针。

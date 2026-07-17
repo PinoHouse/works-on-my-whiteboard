@@ -1,0 +1,22 @@
+schema_version: 1
+id: dag-workflow
+title: DAG 工作流
+primary_family: scheduling-control-plane
+required: true
+status: draft
+dimensions:
+  - problem-slo
+  - capacity-cost-skew
+  - contracts-data-invariants
+  - consistency-ordering-time
+  - concurrency-transactions-idempotency
+  - cache-index-amplification
+  - failure-recovery-disaster
+  - observability-release-evolution
+claims:
+  - id: dag-workflow-readiness-must-bind-graph-version
+    statement: 任务就绪必须绑定不可变图版本及全部依赖的权威完成版本，否则编辑、补跑与迟到事件会让下游消费不相容输出。
+  - id: dag-workflow-attempt-output-needs-an-authoritative-commit
+    statement: attempt 写出临时文件不等于任务完成，只有当前 task epoch 的输出提交记录才能把一组制品原子暴露给下游。
+  - id: dag-workflow-critical-path-bounds-completion
+    statement: 增加非关键分支并行度不能缩短关键路径下界，扇出只会在共享资源不足时进一步放大排队与重试。

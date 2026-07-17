@@ -1,0 +1,24 @@
+schema_version: 1
+id: container-orchestrator
+title: 容器编排器
+primary_family: scheduling-control-plane
+required: true
+status: draft
+dimensions:
+  - problem-slo
+  - capacity-cost-skew
+  - contracts-data-invariants
+  - placement-routing-sharding
+  - consistency-ordering-time
+  - concurrency-transactions-idempotency
+  - failure-recovery-disaster
+  - overload-backpressure-degradation
+  - observability-release-evolution
+  - security-privacy-multitenancy
+claims:
+  - id: container-orchestrator-convergence-requires-versioned-desired-state
+    statement: 控制器必须以带 resourceVersion 的期望状态反复协调观测状态，否则并发更新和重试会丢失用户意图或制造重复对象。
+  - id: container-orchestrator-node-lease-does-not-fence-external-effects
+    statement: 节点租约过期只使控制面停止相信该节点，不能立即停止分区节点上的容器；有状态外部写必须另有 workload epoch fencing。
+  - id: container-orchestrator-placement-is-constrained-allocation
+    statement: 副本放置同时受资源、故障域、亲和性、端口和租户配额约束，局部贪心在碎片化后可能有空闲总量却无可行位置。

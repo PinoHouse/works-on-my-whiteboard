@@ -1,0 +1,23 @@
+schema_version: 1
+id: identity-authorization-service
+title: 身份与授权服务
+primary_family: scheduling-control-plane
+required: true
+status: draft
+dimensions:
+  - problem-slo
+  - capacity-cost-skew
+  - contracts-data-invariants
+  - consistency-ordering-time
+  - cache-index-amplification
+  - failure-recovery-disaster
+  - overload-backpressure-degradation
+  - observability-release-evolution
+  - security-privacy-multitenancy
+claims:
+  - id: identity-authorization-service-authentication-does-not-prove-current-authorization
+    statement: 有效签名只能证明某凭证由可信世代签发，不能证明主体在当前策略与资源状态下仍被允许执行该动作。
+  - id: identity-authorization-service-offline-tokens-bound-revocation-freshness
+    statement: 完全离线验证令牌时，撤销生效下界受令牌寿命或撤销信息传播时间约束，无法同时获得无限离线可用与即时 deny。
+  - id: identity-authorization-service-policy-decisions-need-versioned-inputs
+    statement: 授权决定必须记录身份、会话、策略和资源属性版本，否则审计无法复现允许原因，缓存也无法安全失效。

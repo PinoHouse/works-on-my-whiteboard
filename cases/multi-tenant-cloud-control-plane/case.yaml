@@ -1,0 +1,24 @@
+schema_version: 1
+id: multi-tenant-cloud-control-plane
+title: 多租户云控制平面
+primary_family: scheduling-control-plane
+required: true
+status: draft
+dimensions:
+  - problem-slo
+  - capacity-cost-skew
+  - contracts-data-invariants
+  - placement-routing-sharding
+  - consistency-ordering-time
+  - concurrency-transactions-idempotency
+  - failure-recovery-disaster
+  - overload-backpressure-degradation
+  - observability-release-evolution
+  - security-privacy-multitenancy
+claims:
+  - id: multi-tenant-cloud-control-plane-accepted-is-not-ready
+    statement: API 接受只表示期望状态和 operation 已持久化，底层资源 provider 的异步事实未收敛前不能宣称资源 ready。
+  - id: multi-tenant-cloud-control-plane-provider-effects-need-stable-identity
+    statement: 外部创建响应丢失时，重试必须携带稳定资源身份和 operation epoch，否则同一租户请求可能产生两个计费资源。
+  - id: multi-tenant-cloud-control-plane-fairness-needs-per-tenant-admission
+    statement: 全局队列会让单个大租户的扇出 saga 占满 worker 与 provider 配额，多租户控制面必须在入口和执行阶段都保留公平预算。

@@ -1,0 +1,23 @@
+schema_version: 1
+id: deployment-system
+title: 部署系统
+primary_family: scheduling-control-plane
+required: true
+status: draft
+dimensions:
+  - problem-slo
+  - capacity-cost-skew
+  - contracts-data-invariants
+  - placement-routing-sharding
+  - consistency-ordering-time
+  - concurrency-transactions-idempotency
+  - failure-recovery-disaster
+  - overload-backpressure-degradation
+  - observability-release-evolution
+claims:
+  - id: deployment-system-progress-must-bind-rollout-generation
+    statement: 扩容、切流和回滚都必须绑定当前 rollout generation，否则迟到控制器会把已经回滚的坏版本再次推进。
+  - id: deployment-system-health-is-a-delayed-noisy-observation
+    statement: 探针成功只能证明局部瞬时存活，部署推进必须在业务信号的有界观测窗中权衡检测速度、误报与故障暴露量。
+  - id: deployment-system-rollback-does-not-reverse-incompatible-state
+    statement: 二进制回滚无法自动撤销新版本已写的数据、消息或外部副作用，协议演进必须先保持前后兼容。

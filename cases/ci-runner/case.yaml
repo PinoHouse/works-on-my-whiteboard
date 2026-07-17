@@ -1,0 +1,22 @@
+schema_version: 1
+id: ci-runner
+title: CI 运行器
+primary_family: scheduling-control-plane
+required: true
+status: draft
+dimensions:
+  - problem-slo
+  - capacity-cost-skew
+  - contracts-data-invariants
+  - concurrency-transactions-idempotency
+  - failure-recovery-disaster
+  - overload-backpressure-degradation
+  - observability-release-evolution
+  - security-privacy-multitenancy
+claims:
+  - id: ci-runner-untrusted-code-requires-capability-bounded-isolation
+    statement: 仓库代码可完全不可信，构建隔离与短期能力必须确保它不能读取未授权 secret、控制宿主或访问其他租户运行。
+  - id: ci-runner-cache-and-artifacts-require-provenance
+    statement: 共享缓存与制品若不绑定输入摘要、构建世代和信任域，攻击者或旧 runner 就能让后续可信构建消费被投毒结果。
+  - id: ci-runner-expired-attempt-must-not-publish-success
+    statement: runner 租约过期后返回的日志可以留作诊断，但其状态、缓存和发布制品必须被当前 build epoch 拒绝。

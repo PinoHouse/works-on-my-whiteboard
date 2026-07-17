@@ -1,0 +1,22 @@
+schema_version: 1
+id: job-scheduler
+title: 作业调度器
+primary_family: scheduling-control-plane
+required: true
+status: draft
+dimensions:
+  - problem-slo
+  - capacity-cost-skew
+  - contracts-data-invariants
+  - consistency-ordering-time
+  - concurrency-transactions-idempotency
+  - failure-recovery-disaster
+  - overload-backpressure-degradation
+  - observability-release-evolution
+claims:
+  - id: job-scheduler-trigger-identity-must-survive-recomputation
+    statement: 周期触发必须由稳定的计划版本与逻辑时间槽标识，否则领导者切换或补跑会把同一次触发误建为多个运行。
+  - id: job-scheduler-lease-needs-side-effect-fencing
+    statement: 执行租约只能证明 worker 暂时有权运行；若外部副作用不校验更高 fencing epoch，过期 worker 仍可在新 worker 之后提交。
+  - id: job-scheduler-retry-cannot-prove-exactly-once-effects
+    statement: 调度器在响应丢失后无法同时确定外部操作是否成功与是否应重试，必须依赖幂等目标、查询或可对账补偿。
