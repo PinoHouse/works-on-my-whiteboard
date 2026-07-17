@@ -19,4 +19,4 @@ claims:
   - id: ticketing-capacity-must-have-one-owner
     statement: 同一可售资源在任一时刻必须只有一个有效分配权威。
   - id: ticketing-hold-trades-utilization-for-contention-control
-    statement: 临时占座降低并发超卖风险，但会制造库存闲置与回收问题。
+    statement: 临时占座在外部支付期间保留买家的分配权，减少“先付款、后发现无票”的补偿竞态，但会牺牲库存利用率并引入回收问题。

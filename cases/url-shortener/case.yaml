@@ -10,6 +10,7 @@ dimensions:
   - contracts-data-invariants
   - placement-routing-sharding
   - consistency-ordering-time
+  - concurrency-transactions-idempotency
   - cache-index-amplification
   - failure-recovery-disaster
   - observability-release-evolution

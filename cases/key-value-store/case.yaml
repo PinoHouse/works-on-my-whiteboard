@@ -19,4 +19,4 @@ claims:
   - id: key-value-store-acknowledgement-bounds-declared-durability
     statement: 写入确认早于所声明故障范围内的足够副本持久化时，系统无法保证已确认值在该故障后仍可读取。
   - id: key-value-store-partition-epoch-fences-stale-owners
-    statement: 分区迁移若没有单调纪元与旧所有者 fencing，旧新所有者就可能同时接受写入并产生不可线性化的版本历史。
+    statement: 分区迁移必须以联合共识成员变更让新旧配置的提交 quorum 相交；无法证明旧配置已失去确认权时，新组不得确认写入。
