@@ -22,4 +22,4 @@ claims:
   - id: live-comments-slow-viewers-must-not-create-unbounded-per-viewer-backlog
     statement: 慢观众不能拥有无界可靠积压，否则单个连接会放大全局内存和尾延迟。
   - id: live-comments-moderation-version-is-part-of-visibility
-    statement: 评论可见性由当前审核版本共同决定，旧广播不得绕过撤回、封禁或隐藏裁决。
+    statement: 权威读取与已观察新 moderation epoch 的边缘不得再显示旧内容；尚未收到 epoch 的边缘只提供有界传播窗内的 best-effort 撤回。

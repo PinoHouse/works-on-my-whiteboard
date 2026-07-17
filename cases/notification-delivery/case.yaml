@@ -16,7 +16,7 @@ dimensions:
   - security-privacy-multitenancy
 claims:
   - id: notification-delivery-policy-selection-precedes-channel-attempts
-    statement: 通知必须先由可审计的偏好、频控、优先级和过期策略决定可用渠道，失败 worker 不能临时改写用户策略。
+    statement: 历史策略裁决只用于审计；每次外发仍须以当前 consent generation 取得发送许可，退订或撤权提交后必须 fencing 旧 worker。
   - id: notification-delivery-provider-acceptance-is-not-user-attention
     statement: 渠道提供方接受一次投递只证明其接管尝试，不证明终端展示、用户注意或用户已读。
   - id: notification-delivery-deduplication-is-scoped-by-business-semantics

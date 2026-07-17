@@ -22,3 +22,5 @@ claims:
     statement: mesh 受端侧上行约束，SFU 受集中转发扇出约束，拓扑选择必须随参与人数和带宽变化。
   - id: video-conferencing-control-plane-membership-does-not-prove-media-reachability
     statement: 控制面加入或信令成功只证明权限和协商状态，不能证明媒体路径可达或可听见。
+  - id: video-conferencing-revocation-commits-at-the-sfu-enforcement-barrier
+    statement: 撤权只有在所有当前 room SFU 停止旧权限世代转发并 ACK、未 ACK 节点被摘除后才提交；控制库写入本身不等于媒体立即停止。

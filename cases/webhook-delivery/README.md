@@ -16,7 +16,7 @@ Webhook 是跨权限域 callback，不是内部队列的透明延伸。消费者
 
 最小接口为 `PublishInTransaction(aggregate,event)`、`CreateSubscription(endpoint,filter)`、`Attempt(event_id,subscription_id)` 与 `Replay(subscription,range)`。权威状态是业务事务中的 `event -> {event_id,aggregate_version,payload_digest}`、订阅的 endpoint/secret 世代，以及 `delivery -> {attempt,status,next_at}`。outbox 与业务变化同一提交，调度器不拥有事件真相。
 
-不变量包括：每个已提交且匹配订阅的事件有可恢复 delivery；同一 `(event_id,subscription)` 可多次尝试但身份与摘要稳定；删除订阅或端点换世代后，旧 worker 不能向旧地址继续发送；消费者响应未知不能被标作确定失败；重放不能生成新的业务事件 ID。
+不变量包括：每个已提交且匹配订阅的事件有可恢复 delivery；同一 `(event_id,subscription)` 可多次尝试但身份与精确 body 摘要稳定；签名必须绑定精确传输 body，或绑定由该 body 计算的 `payload_digest` 与 `event_id,timestamp,schema_version,key_generation`；删除订阅或端点换世代后，旧 worker 不能向旧地址继续发送；消费者响应未知不能被标作确定失败；重放不能生成新的业务事件 ID。接收方只有在摘要匹配、密钥世代有效、时间戳在允许窗口内且 event ID 未被本地重放记录消费时才处理副作用。
 
 订阅 `s` 的工作量近似 `A_s=λ_s×E[attempts_s]`。若单次成功概率为 `p`、最多 `n` 次，期望尝试数为 `Σ_{i=1..n}(1-p)^(i-1)`；端点变慢会同时降低 `p`、增加连接占用和队列年龄。公式描述发送成本，不代表消费者副作用次数为一。
 
@@ -28,19 +28,21 @@ Webhook 是跨权限域 callback，不是内部队列的透明延伸。消费者
 
 [DEDUCED:webhook-delivery-exactly-once-requires-consumer-owned-deduplication] 订单事件 E 到达端点，端点已扣库存并返回 200，响应在回程丢失；重试 E 会再次扣减。发送方 delivery 表只能限制自己的调度，不能回滚消费者数据库。消费者必须在本地事务中条件记录 E 并执行业务副作用，才可对自身效果声明恰好一次；按正文或时间去重会误合并合法事件。
 
+[DEDUCED:webhook-delivery-signature-binds-the-exact-versioned-event] 若只对解析后的若干字段或 body 签名，却不覆盖 event ID、时间戳、schema 版本和密钥世代，攻击者可重放合法正文、替换解释版本，或让接收方误用轮换后的旧密钥。发送方应签名“精确传输 body + 元数据”，或签名 `payload_digest,event_id,timestamp,schema_version,key_generation` 的无歧义编码，其中 digest 必须由收到的原始 body 字节计算。接收方先验证 digest/签名与活跃密钥世代，再检查时间窗，并以 event ID 做持久或覆盖整个重试窗的重放防护；仅有 HMAC 正确不等于请求仍新鲜。
+
 ## 从简单方案演进
 
 最简单正确基线是在业务事务中写 outbox，由一个 worker 逐项 POST、记录尝试并指数退避。它保证不漏意图，却被慢端点阻塞。当某订阅连续失败率超过待校准的 50%，且最老未完成事件超过回调 SLO 的 50%，将该订阅熔断并隔离到独立重试/死信视图，其他订阅继续。
 
 第二步按订阅分区并设置受限并发、公平配额和 endpoint 世代。它隔离背压，却新增分区热点与每订阅顺序选择。当端点 ACK `p99` 超过 5 秒，或 backlog 达到其每分钟安全消费量的 10 倍，降低并发并在契约支持时提供批量或拉取补偿接口，不能靠无限连接掩盖慢消费者。
 
-第三步加入签名轮换、payload schema 版本和可控重放。新旧密钥在明确重叠窗内验证，旧 worker 每次发送前复核 endpoint 世代。重放使用原 event ID，并标记 replay attempt。50%、半个 SLO、5 秒和 10 倍都是待压测及契约校准参数；调低更早隔离但可能误熔断，调高提高利用率却放大积压和出站资源风险。
+第三步加入版本化签名、密钥轮换和可控重放。发送方保留精确 body 字节及其摘要，签名输入同时覆盖 event ID、发送时间戳、schema 版本与 key generation；新旧密钥只在明确重叠窗内验证，旧 worker 每次发送前复核 endpoint 世代。接收方的时间窗至少覆盖约定重试漂移，event ID 重放记录覆盖整个可重放期；人工重放沿用原 event ID，但使用新的 attempt 时间戳并显式标记 replay。50%、半个 SLO、5 秒和 10 倍都是待压测及契约校准参数；调低更早隔离但可能误熔断，调高提高利用率却放大积压和出站资源风险。
 
 未选择同步在业务请求内调用所有端点；只有一个同故障域内、低延迟且业务原子性必须覆盖它的受控消费者时，才可能重新考虑。
 
 ## 设计决定
 
-本设计用事务 outbox 守住事件不漏，调度器为每个匹配订阅创建 delivery，以稳定 event ID、聚合版本、时间戳和密钥世代签名。2xx 只结束发送方当前 delivery；超时记 `UNKNOWN` 并重试，4xx 按契约区分永久错误与限流，端点删除或轮换通过世代 fencing 拒绝旧任务。
+本设计用事务 outbox 守住事件不漏，调度器为每个匹配订阅创建 delivery，并保存精确待传 body 与 `payload_digest`。每次 attempt 对 `payload_digest,event_id,timestamp,schema_version,key_generation` 的长度前缀编码签名；等价实现可以直接覆盖精确 body 字节和同一组元数据，不能重新序列化 JSON 后再猜测等价。接收方用原始请求字节重算摘要，校验活跃/重叠期密钥、允许时间窗与 event ID 重放记录，然后在本地事务中记录 E 并执行副作用。2xx 只结束发送方当前 delivery；超时记 `UNKNOWN` 并重试，4xx 按契约区分永久错误与限流，端点删除或轮换通过世代 fencing 拒绝旧任务。
 
 故障时间线是：0 ms 订单与 E 同时提交；100 ms attempt 1 到达端点并完成副作用；150 ms 200 回包丢失；1 分钟发送方以同一 E 重试；消费者本地去重命中后直接确认。能精确保证 outbox 可恢复、尝试有记录；不能保证远端即时处理、恰好一次或不同事件的全局到达顺序。
 
@@ -50,13 +52,13 @@ Webhook 是跨权限域 callback，不是内部队列的透明延伸。消费者
 
 核心 SLI 是 outbox 提交缺口数、首次尝试延迟、每订阅最老 backlog、成功/未知/永久失败比例、重试放大、endpoint 世代拒绝和重放结果。按租户与订阅拆分公平性。过载时先延后低优先事件、收紧故障订阅并发、熔断私有端点，最后才限制新订阅；业务提交仍需产生 outbox。
 
-演练让端点处理成功后丢弃响应，验证相同 E 被重试、消费者样例只产生一次效果；同时轮换 endpoint，验证旧 worker 被 fencing。schema 升级先发送兼容字段或版本化 payload，小比例订阅灰度并监控 4xx；回滚继续识别已产生的新版本事件，不能改写 payload 摘要。
+演练让端点处理成功后丢弃响应，验证相同 E 被重试、消费者样例只产生一次效果；再分别篡改 body、event ID、schema 版本和 key generation，使用过期时间戳并重放已处理 E，验证接收方全部拒绝。轮换 endpoint/secret 时验证旧 worker 被 fencing，重叠窗结束后旧 key generation 不再有效。schema 升级先发送兼容字段或版本化 payload，小比例订阅灰度并监控 4xx；回滚继续识别已产生的新版本事件，不能改写 payload 摘要。
 
 端点解析必须阻止 SSRF、DNS rebinding 与无限重定向，签名密钥分租户加密并可撤销。多地域 outbox 由业务聚合所有者产生；跨区域调度可以重复，但不另造事件。成本按出站字节、连接时间、尝试次数和长期死信保留归因。
 
 ## 面试考察本质
 
-给定“已提交业务变化不能落入不可恢复的回调空洞”的不变量，因为发送方超时后不知道消费者是否已经产生副作用，候选人应推导出事务 outbox、至少一次 callback、稳定 event ID 与消费者本地原子去重；并依据慢订阅 backlog、ACK 延迟和安全风险隔离，而非宣称发送端恰好一次。
+给定“已提交业务变化不能落入不可恢复的回调空洞，且接收方只处理签名绑定的精确版本化事件”的不变量，因为发送方超时后不知道消费者是否已经产生副作用，候选人应推导出事务 outbox、至少一次 callback、稳定 event ID、精确 body/摘要签名、时间窗与消费者本地原子去重；并依据慢订阅 backlog、ACK 延迟和安全风险隔离，而非宣称发送端恰好一次或把 HMAC 当作完整防重放协议。
 
 优秀信号包括指出消费者拥有副作用、给出 200 丢失时间线、按订阅隔离、定义聚合版本顺序并处理密钥世代。常见误区是业务提交后内存异步发送、无限重试、按正文去重，或让 Webhook 参与虚假的跨互联网事务。
 

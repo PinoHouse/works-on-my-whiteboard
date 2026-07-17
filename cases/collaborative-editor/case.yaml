@@ -23,3 +23,5 @@ claims:
     statement: 稳定操作 ID 与因果上下文用于区分重放、并发和基于过期版本的编辑。
   - id: collaborative-editor-compaction-must-preserve-offline-merge-meaning
     statement: 压缩历史必须保留仍被允许回归的离线操作所需语义，否则重放会改变文档或无法合并。
+  - id: collaborative-editor-local-durability-is-not-shared-commit
+    statement: 本地持久化只保证离线操作可恢复和重试；操作只有通过当前权限、协议与保留窗校验并由权威层提交后才属于共享文档。

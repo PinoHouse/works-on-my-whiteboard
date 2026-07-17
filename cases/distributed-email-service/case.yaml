@@ -19,6 +19,6 @@ claims:
   - id: distributed-email-service-acceptance-transfers-custody-not-recipient-visibility
     statement: 本地接受邮件表示服务已承担可恢复的保管责任，不表示远端收件箱展示或收件人阅读。
   - id: distributed-email-service-ambiguous-smtp-response-forces-at-least-once-transfer
-    statement: 远端接收响应丢失时，重传可避免静默丢信，却无法保证远端只出现一封邮件。
+    statement: 远端可能已接收但 250 响应丢失后，收件人必须保持 AMBIGUOUS_MAY_HAVE_DELIVERED；后续失败可停止重试，却不能证明首次投递未发生。
   - id: distributed-email-service-retry-must-be-isolated-by-recipient-domain
     statement: 邮件重试必须按收件域隔离，否则一个故障域会阻塞健康域并耗尽全局投递容量。

@@ -21,3 +21,5 @@ claims:
     statement: 消费者副作用是否重复只能由消费者以稳定事件 ID 在自己的事务中去重。
   - id: webhook-delivery-outbox-couples-business-commit-to-recoverable-intent
     statement: 业务变化与待回调意图必须在同一提交边界写入 outbox，否则崩溃窗口会永久漏回调。
+  - id: webhook-delivery-signature-binds-the-exact-versioned-event
+    statement: Webhook 签名必须绑定精确 body 或其摘要以及事件 ID、时间戳、schema 版本和密钥世代，接收方还必须校验时间窗与重放。

@@ -10,13 +10,13 @@
 
 先问最大参与人数、是否多人同时开视频、端到端嘴到耳延迟、音频/视频质量底线、移动网络比例、是否需要端到端加密、录制、屏幕共享和区域合规。容量用参与数 `N`、每轨码率 `r`、订阅矩阵、分层编码和转发出口表达，并明确加入成功、首帧时间、卡顿率和音频可懂度 SLO。
 
-还要确认主持人权限、踢出传播、重连是否创建新媒体会话、录制成功的定义。安全边界包括成员世代、密钥轮换、未授权订阅、恶意码率和媒体节点隔离。非目标是补回未录制直播、保证每帧到达、为媒体建立全球总序，或从信令成功推导每个人都能听见。
+还要确认主持人权限、踢出传播、重连是否创建新媒体会话、撤权 API 在控制库写入还是 SFU enforcement barrier 后返回，以及录制成功的定义。安全边界包括成员世代、密钥轮换、未授权订阅、恶意码率和媒体节点隔离。非目标是补回未录制直播、保证每帧到达、为媒体建立全球总序，或从信令成功推导每个人都能听见。
 
 ## 客观模型
 
 最小接口为 `Join(meeting,participant,permission_epoch)`、`Negotiate(transport,tracks)`、`Publish(track,media_epoch)`、`Subscribe(track,layer)` 与 `CommitRecordingSegment(index,digest)`。权威状态是会议成员、权限世代、密钥/协商状态和录制段索引；RTP 包是短生命周期数据。SFU 按当前订阅与拥塞信号转发，不拥有永久媒体日志。
 
-不变量是：只有当前成员与权限 epoch 能发布/订阅轨；旧 transport epoch 的迟到包不能混入重连轨；同一 SSRC/epoch 的序号用于 jitter 处理而非跨轨总序；声明已完成的录制段索引必须可恢复。实时媒体晚于 deadline 后可以丢弃，但权限撤销后的媒体不能因可用性降级继续转发。
+不变量是：只有当前成员与权限 epoch 能发布/订阅轨；旧 transport epoch 的迟到包不能混入重连轨；同一 SSRC/epoch 的序号用于 jitter 处理而非跨轨总序；声明已完成的录制段索引必须可恢复。撤权控制记录先提升 room permission epoch，但只有所有当前转发 SFU 已停止为旧 epoch 新入队/转发并 ACK，或未 ACK SFU 已从房间路由摘除后，撤权才算 committed；控制库写入本身不等于媒体面已经执行。
 
 嘴到耳延迟近似 `L=capture+encode+network+jitter_buffer+decode+render`。mesh 中每端上行约 `(N-1)×r`，连接边为 `N(N-1)/2`；SFU 让端侧上行约为 `r`，但总转发可接近 `N×(N-1)×r`，选择性订阅与分层编码可降低它。热点是单房间订阅矩阵和媒体出口，不是会议数平均值。
 
@@ -27,6 +27,8 @@
 [DEDUCED:video-conferencing-topology-is-bounded-by-participant-uplink-and-forwarding-fanout] mesh 随 `N` 增长要求每端发送多份媒体，弱上行先失败；SFU 只收一份，却把复制、拥塞控制和出口集中到媒体节点。不存在通用最优拓扑，必须由参与数、上行与订阅决定；MCU 可降低端侧解码，却新增服务器编解码成本与延迟。
 
 [DEDUCED:video-conferencing-control-plane-membership-does-not-prove-media-reachability] Join 提交与 SDP/密钥协商只能证明允许尝试建立路径，NAT、路径切换、丢包或接收端解码仍会让媒体不可用。因此断连后可精确保证成员/权限最终状态、新 epoch fencing 与已提交录制段；只能 best-effort 保证实时包、首帧、连续可听和界面展示。
+
+[DEDUCED:video-conferencing-revocation-commits-at-the-sfu-enforcement-barrier] 主持人在控制库把 A 标成离会时，某 room SFU 可能尚未收到 epoch 6，继续按 epoch 5 转发；因此数据库提交不能支撑“媒体已停止”的声明。本设计把撤权 commit point 定义为 SFU enforcement barrier：协调器等待所有当前房间 SFU ACK 已停止旧 epoch 的新入队/转发，未 ACK 节点先从路由摘除，再向主持人返回 committed。SFU ACK 前已经发到网络或接收端 jitter buffer 的包仍可能到达或播放；保证边界是 barrier 后不再产生新的旧世代转发，不是抹除在途媒体。
 
 ## 从简单方案演进
 
@@ -40,9 +42,9 @@
 
 ## 设计决定
 
-本设计把成员、权限、密钥与媒体 epoch 放在可靠控制面，媒体面使用 SFU 为主、小房间可选 mesh。每次重连创建新 transport epoch，SFU 丢弃旧 epoch 迟到包。端点用序号与时间戳管理 jitter，过 deadline 丢弃，音频以 FEC/PLC 恢复感知质量，视频请求关键帧并自适应订阅层。
+本设计把成员、权限、密钥与媒体 epoch 放在可靠控制面，媒体面使用 SFU 为主、小房间可选 mesh。撤权先在控制面提升 room permission epoch，向所有当前 room SFU 下发 fence；每个 SFU 停止接受和转发旧 epoch、清空尚未发出的旧队列后 ACK，协调器摘除未 ACK SFU，barrier 完成后才返回撤权 committed。每次重连创建新 transport epoch，SFU 丢弃旧 epoch 迟到包。端点用序号与时间戳管理 jitter，过 deadline 丢弃，音频以 FEC/PLC 恢复感知质量，视频请求关键帧并自适应订阅层。
 
-故障时间线是：0 ms A 以权限 epoch 5 发布；20 ms SFU 转发；100 ms 网络切换产生序号缺口；jitter window 后播放器丢迟到包并降视频层；2 秒 A 以 transport epoch 6 重连，epoch 5 迟到包被拒绝。能保证权限 fencing 与录制索引，不能保证未录媒体补回、每帧到达、跨轨顺序或“在会即能听见”。
+撤权故障时间线是：0 ms A 以权限 epoch 5 发布；20 ms 主持人发起撤权，控制库写 epoch 6；35 ms SFU-1 停止旧转发并 ACK，SFU-2 分区未 ACK；50 ms 协调器把 SFU-2 从房间路由摘除，barrier 完成并返回 committed。SFU-1 在 35 ms 前、SFU-2 在被摘除前已经发到网络的包仍可能在 jitter deadline 内播放；50 ms 后不会再由当前房间路由产生 epoch 5 新转发。能保证的是该 enforcement barrier 后的 forwarding fence 与录制索引，不能保证清除在途包、补回未录媒体、每帧到达、跨轨顺序或“在会即能听见”。
 
 未采用以 TCP 式可靠有序流承载所有音视频，因为队首阻塞会让过期帧拖慢新帧。屏幕共享中的静态关键内容或录制上传可使用更可靠通道，但仍与互动音频分离。
 
@@ -50,13 +52,13 @@
 
 核心 SLI 是加入成功与首媒体时间、嘴到耳延迟、音频丢包/PLC 比例、jitter-buffer 欠载与长度、视频冻结、每轨码率、SFU 房间出口、重连与旧 epoch 丢弃、录制段缺口。按会议、地区、网络类型和设备能力分桶。过载先降不可见视频层、分辨率和帧率，再暂停非必要视频；音频和控制面最后降级。
 
-演练移动端 Wi-Fi 切蜂窝，注入乱序与旧路径恢复，验证新 epoch fencing、音频保持可懂且延迟不无界增长；再让媒体节点故障，验证控制面重分配与关键帧恢复。协议升级先协商双方能力、灰度新编解码器并保留旧 codec 回退；已产生录制段格式必须长期可读。
+演练移动端 Wi-Fi 切蜂窝，注入乱序与旧路径恢复，验证新 transport epoch fencing、音频保持可懂且延迟不无界增长；再让一个 room SFU 在撤权时分区，验证控制库写入后 API 尚不宣称 committed、未 ACK SFU 被摘除、barrier 后无旧 permission epoch 新转发，同时把 ACK 前已发出的在途包计入允许边界。媒体节点故障演练验证控制面重分配与关键帧恢复。协议升级先协商双方能力、灰度新编解码器并保留旧 codec 回退；已产生录制段格式必须长期可读。
 
 房间按参与者网络与数据驻留选择媒体区域，控制面多地域复制不能替代媒体路径测量。密钥轮换与踢出提升权限世代，媒体节点只持短期密钥。成本按入站码率、订阅转发出口、转码 GPU/CPU 和录制存储分别归因。
 
 ## 面试考察本质
 
-给定“只有当前权限世代的轨可被转发，且互动媒体必须在播放截止前到达”的不变量，因为网络无法保证每包及时到达、端点也没有无限上行，候选人应把可恢复控制面与可丢失媒体面拆开；再依据参与人数、jitter、丢包和拓扑扇出选择 mesh、SFU、MCU 及降质顺序。
+给定“撤权只在 room SFU enforcement ACK barrier 后提交，此后不再产生旧权限世代的新转发；互动媒体必须在播放截止前到达”的不变量，因为控制库提交不等于媒体节点执行、网络也无法撤回已发出的包，候选人应把可恢复控制面、SFU enforcement 与可丢失媒体面拆开，并明确在途包边界；再依据参与人数、jitter、丢包和拓扑扇出选择 mesh、SFU、MCU 及降质顺序。
 
 优秀信号包括写出延迟分解、指出迟到重传反例、区分 join 与媒体可达、解释音频优先和新 transport epoch。常见误区是把媒体放进可靠队列、只讨论信令、不算 SFU 出口，或为提升完整度无限拉长 jitter buffer。
 
