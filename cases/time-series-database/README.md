@@ -14,9 +14,9 @@
 
 ## 客观模型
 
-状态为 `{tenant,metric,canonical_labels -> series_id}`，每个 ingest 分片保存 `{WAL, head_chunks, immutable_blocks, compaction_generation, source_epochs, shard_watermark_floor}`，保留控制面保存各数据层的删除边界。标签索引拥有 series 身份，接收复制组拥有样本耐久记录，块目录拥有查询可见 generation。令未关闭 epoch `s` 的单调进度为 `P_{j,s}`，分片 `j` 的单调最终 horizon 为 `F_j`，则 `F_j(t)=max(F_j(t-1), min_{s∈Open_j(t)} P_{j,s}(t))`；没有 open epoch 时保持已有 `F_j`，显式 close 或可信 idle close 只能移除阻塞或前推 floor，绝不能令它回退。每个新 epoch 必须由服务端 `OpenEpoch` 分配 `start_floor_s≥F_j`，且 `P_{j,s}≥start_floor_s`；任何事件时间早于当前 `F_j` 的样本，即使换新 epoch 提交，也只能拒绝或进入版本化回填。相关查询分片集合为 `J` 时，`F_query=min_{j∈J}(F_j)`。接口可表示为 `OpenEpoch(source)`、`Ingest(series,timestamp,value,sample_id,source_epoch)`、`CloseEpoch(source_epoch,terminal_horizon)` 与 `Query(matchers,start,end,as_of)`；返回结果需说明 `F_query`、结果 generation 或是否仍可修正。
+状态为 `{tenant,metric,canonical_labels -> series_id}`，每个 ingest 分片保存 `{WAL, head_chunks, immutable_blocks, compaction_generation, source_epochs, shard_watermark_floor}`，保留控制面保存各数据层的删除边界。标签索引拥有 series 身份，接收复制组拥有样本耐久记录，块目录拥有查询可见 generation。令未关闭 epoch `s` 的单调进度为 `P_{j,s}`，分片 `j` 的单调最终 horizon 为 `F_j`，定义 `Advance_j(O,P,F)=F`（`O` 为空），否则 `Advance_j(O,P,F)=max(F,min_{s∈O}P_{j,s})`；普通进度更新执行 `F_j←Advance_j(Open_j,P_j,F_j)`。`CloseEpoch(s,h)` 先验证 epoch 仍 open 且 `h=terminal_horizon≥max(start_floor_s,P_{j,s})`；可信 idle close 的 `h` 还必须由服务端根据误差有界的接收时钟和事件时间约束推导，不能接受客户端任意抬高。随后在同一原子状态转换中先令 `P'_{j,s}=h`，计算 `F'_j=Advance_j(Open_j,P'_j,F_j)`，再令 `Open'_j=Open_j\{s\}`；其他 source 进度不变。这样 `h` 在移除前参与 shard floor 推进；若 `s` 是最后一个 open epoch，移除后为空仍保留 `F'_j`，若仍有 open epoch，后续推进只由剩余进度约束。每个新 epoch 必须由服务端 `OpenEpoch` 分配 `start_floor_s≥F_j`，且 `P_{j,s}≥start_floor_s`；任何事件时间早于当前 `F_j` 的样本，即使换新 epoch 提交，也只能拒绝或进入版本化回填。相关查询分片集合为 `J` 时，`F_query=min_{j∈J}(F_j)`。接口可表示为 `OpenEpoch(source)`、`Ingest(series,timestamp,value,sample_id,source_epoch)`、`CloseEpoch(source_epoch,terminal_horizon)` 与 `Query(matchers,start,end,as_of)`；`CloseEpoch` 的校验、进度与 floor 推进、epoch 移除必须作为一次提交，返回结果需说明新的 `F_j`，查询返回则需说明 `F_query`、结果 generation 或是否仍可修正。
 
-不变量是已确认样本在声明故障范围可恢复；同一样本身份重试不重复计数；同时间戳冲突按 metric 类型采用确定规则；查询不会同时读取被替换块的新旧 generation；`F_j` 对任何 source epoch 的 open/close 都单调不减，新 epoch 的服务端 `start_floor` 不低于当前最终 horizon。窗口只有在所有相关分片的 `F_query` 越过末端后才最终；事件时间早于 floor 的样本无论来自已关闭旧 epoch 还是新 epoch，都必须拒绝或进入可追踪的版本化回填，不能绕过最终性；保留删除不会因压实重新引入过期样本。canonical labels 的排序与编码必须一致，否则同一逻辑序列会被分裂。
+不变量是已确认样本在声明故障范围可恢复；同一样本身份重试不重复计数；同时间戳冲突按 metric 类型采用确定规则；查询不会同时读取被替换块的新旧 generation；`F_j` 对任何 source epoch 的 open/close 都单调不减，新 epoch 的服务端 `start_floor` 不低于当前最终 horizon。关闭 epoch 不得先删除 source 再凭空修改 floor：`terminal_horizon` 必须不低于该 epoch 的 `start_floor` 和当前进度，并在同一提交中先推进 source 进度、据此推进 shard floor，再移除 epoch。窗口只有在所有相关分片的 `F_query` 越过末端后才最终；事件时间早于 floor 的样本无论来自已关闭旧 epoch 还是新 epoch，都必须拒绝或进入可追踪的版本化回填，不能绕过最终性；保留删除不会因压实重新引入过期样本。canonical labels 的排序与编码必须一致，否则同一逻辑序列会被分裂。
 
 活跃 series 数为 `S`，每条 head 元数据和缓冲为 `m` 字节，标签索引平均为 `i` 字节，内存 `M` 必须满足 `S×(m+i)≤M`。逻辑摄取率为 `λ`，有 `R` 个降采样层且每层写比例为 `a_j`，物理写近似 `λ×(1+Σa_j)`，再乘复制和压实因子。乱序率会让已封存块重开或产生补丁块，故相同 `λ` 下成本也可完全不同。
 
@@ -26,7 +26,7 @@
 
 [DEDUCED:time-series-database-ingest-acknowledgement-must-bind-deduplication-and-durability] 客户端发送样本后响应丢失，它不知道首写是否进 WAL；重发可能造成 counter 重复，放弃又可能丢样。只有同一 sample_id 的幂等记录，或明确的 `(series_id,timestamp)` 冲突规则，加上可恢复 WAL 边界，才能让两次结果收敛。若 leader 只在内存中确认后崩溃，去重状态和样本一起消失，新的 leader 仍无法区分重试，因此持久性与去重不能分开声明。
 
-[DEDUCED:time-series-database-window-finality-depends-on-a-lateness-bound] 一分钟窗口在分片 A 首次计算为九十，但相关分片 B 的 source 已安静且 floor 仍停在十一点五十九分；即使 A 已到十二点零三分，`F_query=min(F_A,F_B)` 仍未越过窗口末端，结果不能称为最终。安静 source 只有显式关闭 epoch，或在可信且误差有界的接收时钟上触发 idle lease、关闭旧 epoch 后，才不再无限阻塞。允许晚到 `L` 时，“约在 `end+L` 关闭”还依赖该可信时间和每个 source 的事件时间约束；一旦 B 的 floor 前推到十二点零一分，后来新开的 epoch 也必须取得不低于该 horizon 的 `start_floor`。因此早于 floor 的旧样本不能靠换 epoch 绕过关闭，只能拒绝或进入产生新 generation 的版本化回填，不能静默改写已声明最终的结果。
+[DEDUCED:time-series-database-window-finality-depends-on-a-lateness-bound] 一分钟窗口在分片 A 首次计算为九十，但相关分片 B 的 source 已安静且 floor 仍停在十一点五十九分；即使 A 已到十二点零三分，`F_query=min(F_A,F_B)` 仍未越过窗口末端，结果不能称为最终。安静 source 只有显式关闭 epoch，或在可信且误差有界的接收时钟上触发 idle lease、关闭旧 epoch 后，才不再无限阻塞。允许晚到 `L` 时，“约在 `end+L` 关闭”还依赖该可信时间和每个 source 的事件时间约束；关闭必须验证 `terminal_horizon` 不低于 epoch 起点和当前进度，并在删除 epoch 前让该 horizon 参与 source 与 shard floor 的原子推进。一旦 B 的 floor 因此推进到十二点零一分，后来新开的 epoch 也必须取得不低于该 horizon 的 `start_floor`。因此早于 floor 的旧样本不能靠换 epoch 绕过关闭，只能拒绝或进入产生新 generation 的版本化回填，不能静默改写已声明最终的结果。
 
 ## 从简单方案演进
 
@@ -40,7 +40,7 @@
 
 ## 设计决定
 
-本设计先规范化 metric 与标签并执行租户基数准入，再查找或创建 series_id。批次按 series 分片送到 ingest leader，使用 sample_id 或声明的同时间戳策略去重，追加到跨故障域 WAL 并达到所选确认级别后响应。source 必须先向服务端打开 epoch 并取得 `start_floor≥F_j`；普通 ingest 只接纳未关闭 epoch 且事件时间不早于当前 floor 的样本，早于 floor 的样本直接拒绝或路由到版本化回填。每个 epoch 以单调事件进度推进候选值，显式 close 或可信时钟上的 idle close 只能使 `F_j` 保持或前进；旧 epoch 关闭后不能重开，另开 epoch 也不能取得更低 floor。查询协调器对所有相关分片取 `F_query`。head 按允许乱序窗口缓冲，封存为不可变块；尚未越过 floor 的可变窗口允许普通补丁，事件时间早于最终 floor 的数据只进入隔离回填并发布新查询 generation。块目录以 generation 原子发布压实结果。
+本设计先规范化 metric 与标签并执行租户基数准入，再查找或创建 series_id。批次按 series 分片送到 ingest leader，使用 sample_id 或声明的同时间戳策略去重，追加到跨故障域 WAL 并达到所选确认级别后响应。source 必须先向服务端打开 epoch 并取得 `start_floor≥F_j`；普通 ingest 只接纳未关闭 epoch 且事件时间不早于当前 floor 的样本，早于 floor 的样本直接拒绝或路由到版本化回填。每个 epoch 以单调事件进度推进候选值。显式 close 或可信时钟上的 idle close 先拒绝低于 `max(start_floor,current_progress)` 的 `terminal_horizon`，再原子地以该 horizon 推进 source 进度和 `F_j`、移除 epoch；即使移除的是最后一个 open epoch，推进后的 `F_j` 也继续保留。旧 epoch 关闭后不能重开，另开 epoch 也不能取得更低 floor。查询协调器对所有相关分片取 `F_query`。head 按允许乱序窗口缓冲，封存为不可变块；尚未越过 floor 的可变窗口允许普通补丁，事件时间早于最终 floor 的数据只进入隔离回填并发布新查询 generation。块目录以 generation 原子发布压实结果。
 
 查询先按标签索引取得 series，再裁剪时间块，合并 head、基础块和当前补丁 generation。实时结果携带跨相关分片的 `F_query`；最终查询默认只覆盖 `F_query≥window_end` 的窗口，并返回结果 generation。超时重试保持批次和样本身份。过载时先停止低价值 rollup 与宽范围查询，限制新 series 和回填，再按租户公平摄取；不能丢弃已确认 WAL、把 idle source 无条件排除、为新 epoch 下调 start floor，或静默扩大去重覆盖规则。
 
@@ -48,16 +48,16 @@
 
 ## 运行与演进
 
-SLI 包括确认摄取延迟、WAL 未复制字节、去重命中与冲突、活跃 series、标签新值率、head 内存、乱序分布、各分片 floor 与 source 进度落后、epoch open/close 后 floor 回退检测、低于 start floor 的拒绝/回填数、idle epoch 数、最终后拒绝/回填数、compaction/backfill backlog、查询扫描块数、保留删除延迟和按租户拒绝数。容量预警同时看 `S` 和增长导数；平均样本压缩率良好并不能证明 head 安全。
+SLI 包括确认摄取延迟、WAL 未复制字节、去重命中与冲突、活跃 series、标签新值率、head 内存、乱序分布、各分片 floor 与 source 进度落后、epoch open/close 后 floor 回退检测、非法 terminal horizon 拒绝数、close 事务失败与重试数、低于 start floor 的拒绝/回填数、idle epoch 数、最终后拒绝/回填数、compaction/backfill backlog、查询扫描块数、保留删除延迟和按租户拒绝数。容量预警同时看 `S` 和增长导数；平均样本压缩率良好并不能证明 head 安全。
 
-故障演练时间线：零毫秒客户端发送 sample_id 77；十毫秒样本达到 WAL quorum；十五毫秒响应丢失；二十毫秒 leader 崩溃；四十毫秒新 leader 从 WAL 恢复去重状态；客户端重发 77，系统返回原结果且只计一次。另一轮让相关分片 A 的 floor 到十二点零二分、B 因一个 idle source 停在十一点五十九分，验证协调器仍以十一点五十九分为 `F_query`；随后用可信时钟关闭 B 的旧 epoch，使 B 的 floor 单调推进到十二点零一分并声明窗口最终。再为同一 source 打开 epoch 时，服务端返回 `start_floor≥12:01`，分片 floor 不回退；无论客户端冒用已关闭 epoch，还是用新 epoch 提交十二点整的样本，系统都拒绝或进入回填并产生新查询 generation，而非悄悄改写最终结果。
+故障演练时间线：零毫秒客户端发送 sample_id 77；十毫秒样本达到 WAL quorum；十五毫秒响应丢失；二十毫秒 leader 崩溃；四十毫秒新 leader 从 WAL 恢复去重状态；客户端重发 77，系统返回原结果且只计一次。另一轮让相关分片 A 的 floor 到十二点零二分、B 只有一个 open idle epoch，`P_B=F_B=11:59`，验证协调器仍以十一点五十九分为 `F_query`。可信时钟和事件时间约束给出 `terminal_horizon=12:01`；B 先验证它不低于该 epoch 的 `start_floor` 与当前 `P_B`，在同一 close 提交中令 `P'_B=12:01`、计算 `F'_B=max(11:59,min{12:01})=12:01`，然后移除最后一个 open epoch。空集合规则保留刚得到的 `F'_B=12:01`，窗口才声明最终；注入在推进与移除之间的崩溃时，恢复后只能看到整个 close 提交之前或之后，不能看到 epoch 已删而 floor 未推进的中间状态。再为同一 source 打开 epoch 时，服务端返回 `start_floor≥12:01`，分片 floor 不回退；无论客户端冒用已关闭 epoch，还是用新 epoch 提交十二点整的样本，系统都拒绝或进入回填并产生新查询 generation，而非悄悄改写最终结果。
 
 标签 schema 迁移先让查询识别新旧规范化规则，再双索引并比较 series 映射，最后停止旧编码；回滚保留读取新 series_id。保留策略先写 delete horizon，再让 compaction 移除，备份和降采样层都需遵守。多地域复制若异步，成功语义只承诺本地域故障域；提升为地域耐久要等待远端 WAL 并接受 RTT。敏感标签要白名单化、散列或加密，避免索引和查询日志泄露身份。
 
 ## 面试考察本质
 
-这题考察的是：给定“确认样本可恢复，且聚合最终性由跨相关分片的单调 floor 与迟到处置共同界定”的不变量，因为接收节点无法预先知道无界标签将分配多少状态、查询也不能把安静 source 当作已结束或用新 epoch 重置最终 horizon，候选人能否把基数准入、去重耐久、服务端 start floor、可信时间、idle epoch、版本化回填、保留与压实放大变成可执行取舍。
+这题考察的是：给定“确认样本可恢复，且聚合最终性由跨相关分片的单调 floor 与迟到处置共同界定”的不变量，因为接收节点无法预先知道无界标签将分配多少状态、查询也不能把安静 source 当作已结束、先删 epoch 再凭空抬高 floor，或用新 epoch 重置最终 horizon，候选人能否把基数准入、去重耐久、服务端 start floor、可信 terminal horizon、原子 close、版本化回填、保留与压实放大变成可执行取舍。
 
-优秀回答会把 series 身份与普通字段区分，用一百万 UUID 的反例量化内存，说明 ingest ack 同时约束 WAL 和去重，并把单调分片 floor、服务端分配且不低于最终 horizon 的 epoch start floor、idle source 关闭、迟到拒绝或版本化回填写进窗口契约。常见误区是只谈压缩、无条件用 `end+L` 推导最终、把安静 source 忽略、关闭旧 epoch 后用新 epoch 回灌已最终数据、允许任意标签后再报警，或让首次 dashboard 数字无条件称为最终。
+优秀回答会把 series 身份与普通字段区分，用一百万 UUID 的反例量化内存，说明 ingest ack 同时约束 WAL 和去重，并把单调分片 floor、服务端分配且不低于最终 horizon 的 epoch start floor、受校验的 terminal horizon、先推进后移除的原子 close、迟到拒绝或版本化回填写进窗口契约。常见误区是只谈压缩、无条件用 `end+L` 推导最终、把安静 source 忽略、先移除最后一个 epoch 再无依据地提高 floor、关闭旧 epoch 后用新 epoch 回灌已最终数据、允许任意标签后再报警，或让首次 dashboard 数字无条件称为最终。
 
 二十分钟完成 series、WAL、head、块和确认语义；四十分钟加入标签索引、乱序、单调 floor、epoch 准入、压实和保留；六十分钟再讨论回填、rollup、多租户、地域和迁移。追问应落在某个样本响应后：它在哪个故障域可恢复，重发怎样去重，所属窗口何时关闭，新 epoch 为什么不能降低最终 horizon，以及新增一个标签值究竟分配了多少长期状态。

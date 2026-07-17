@@ -22,4 +22,4 @@ claims:
   - id: time-series-database-ingest-acknowledgement-must-bind-deduplication-and-durability
     statement: 网络超时后的重发无法判断首写是否成功；缺少样本身份规则和 WAL 耐久边界，系统不能同时避免丢样与重复计数。
   - id: time-series-database-window-finality-depends-on-a-lateness-bound
-    statement: 分片 watermark floor 必须跨 source epoch 单调不减；新 epoch 的服务端 start floor 不低于当前最终 horizon，早于 floor 的样本只能拒绝或版本化回填。
+    statement: 分片 watermark floor 必须跨 source epoch 单调不减；关闭时经校验的 terminal horizon 必须在移除 epoch 前原子推进 source 与 shard floor，新 epoch 的服务端 start floor 不低于当前最终 horizon，早于 floor 的样本只能拒绝或版本化回填。
