@@ -1,0 +1,24 @@
+schema_version: 1
+id: batch-data-pipeline
+title: 批处理数据流水线
+primary_family: streaming-analytics-observability
+required: true
+status: draft
+dimensions:
+  - problem-slo
+  - capacity-cost-skew
+  - contracts-data-invariants
+  - placement-routing-sharding
+  - consistency-ordering-time
+  - cache-index-amplification
+  - async-backpressure-fairness
+  - failure-recovery-disaster
+  - observability-release-evolution
+  - security-privacy-multitenancy
+claims:
+  - id: batch-data-pipeline-replayability-requires-versioned-lineage
+    statement: 可重放结果必须共同记录输入快照、代码、配置、依赖和输出清单。
+  - id: batch-data-pipeline-atomic-publication-is-not-atomic-computation
+    statement: 计算可以分片重试，但完整数据集只能通过单一输出清单或指针切换对读者发布。
+  - id: batch-data-pipeline-backfill-is-a-new-versioned-decision
+    statement: 历史回填会改变下游口径，必须作为带影响范围、比较和回滚的新版本决策。

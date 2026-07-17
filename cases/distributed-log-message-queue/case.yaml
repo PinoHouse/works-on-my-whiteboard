@@ -1,0 +1,24 @@
+schema_version: 1
+id: distributed-log-message-queue
+title: 分布式日志与消息队列
+primary_family: streaming-analytics-observability
+required: true
+status: draft
+dimensions:
+  - problem-slo
+  - capacity-cost-skew
+  - contracts-data-invariants
+  - placement-routing-sharding
+  - consistency-ordering-time
+  - concurrency-transactions-idempotency
+  - async-backpressure-fairness
+  - failure-recovery-disaster
+  - observability-release-evolution
+  - security-privacy-multitenancy
+claims:
+  - id: distributed-log-message-queue-order-is-only-per-partition
+    statement: 偏移量只能证明单分区追加顺序，不能据此推出跨分区总序。
+  - id: distributed-log-message-queue-durable-offset-is-consumer-progress-not-message-acknowledgement
+    statement: 消费组提交偏移只记录该组恢复位置，不代表消息删除、其他组进度或外部副作用完成。
+  - id: distributed-log-message-queue-replication-ack-bounds-log-durability
+    statement: 写入确认必须覆盖声明故障域内的持久副本，否则确认记录仍可能随领导者故障消失。

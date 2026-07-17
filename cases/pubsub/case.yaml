@@ -1,0 +1,24 @@
+schema_version: 1
+id: pubsub
+title: 发布订阅系统
+primary_family: streaming-analytics-observability
+required: true
+status: draft
+dimensions:
+  - problem-slo
+  - capacity-cost-skew
+  - contracts-data-invariants
+  - consistency-ordering-time
+  - concurrency-transactions-idempotency
+  - cache-index-amplification
+  - async-backpressure-fairness
+  - failure-recovery-disaster
+  - observability-release-evolution
+  - security-privacy-multitenancy
+claims:
+  - id: pubsub-subscription-fanout-requires-independent-progress
+    statement: 每个订阅必须独立保存游标与确认状态，共用进度会让快订阅吞掉慢订阅未处理事件。
+  - id: pubsub-publish-acceptance-is-not-all-subscriber-delivery
+    statement: 发布成功只证明事件进入主题保留边界，不证明任何订阅端点已经处理。
+  - id: pubsub-filter-version-is-part-of-delivery-semantics
+    statement: 历史事件是否匹配必须由可审计的过滤版本裁决，重试不能临时套用最新规则。

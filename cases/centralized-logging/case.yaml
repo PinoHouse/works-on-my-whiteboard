@@ -1,0 +1,24 @@
+schema_version: 1
+id: centralized-logging
+title: 集中式日志
+primary_family: streaming-analytics-observability
+required: true
+status: draft
+dimensions:
+  - problem-slo
+  - capacity-cost-skew
+  - contracts-data-invariants
+  - placement-routing-sharding
+  - consistency-ordering-time
+  - cache-index-amplification
+  - async-backpressure-fairness
+  - failure-recovery-disaster
+  - observability-release-evolution
+  - security-privacy-multitenancy
+claims:
+  - id: centralized-logging-searchability-is-a-retention-contract
+    statement: 日志可搜索性依赖原始段、索引版本、保留期和授权策略共同存活。
+  - id: centralized-logging-ingest-ack-bounds-loss-semantics
+    statement: 中央持久确认前丢弃本地缓冲会把网络分区变成不可辨识的数据洞。
+  - id: centralized-logging-index-is-derived-from-immutable-records
+    statement: 搜索索引可以延迟或重建，但不能替代不可变原始记录作为证据权威。

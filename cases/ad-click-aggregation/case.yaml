@@ -1,0 +1,23 @@
+schema_version: 1
+id: ad-click-aggregation
+title: 广告点击聚合
+primary_family: streaming-analytics-observability
+required: true
+status: draft
+dimensions:
+  - problem-slo
+  - capacity-cost-skew
+  - contracts-data-invariants
+  - consistency-ordering-time
+  - cache-index-amplification
+  - async-backpressure-fairness
+  - failure-recovery-disaster
+  - observability-release-evolution
+  - security-privacy-multitenancy
+claims:
+  - id: ad-click-aggregation-dedup-horizon-bounds-count-correctness
+    statement: 去重记录回收后无法区分重放与新事件，因此无重复计数只能覆盖声明的去重期限。
+  - id: ad-click-aggregation-event-time-window-needs-a-lateness-policy
+    statement: 无界乱序事件没有天然关窗时刻，事件时间窗口必须声明水位线和迟到处理策略。
+  - id: ad-click-aggregation-billing-finality-is-not-live-dashboard-freshness
+    statement: 实时报表可以修正，计费最终性必须绑定冻结的归因版本与可审计关窗边界。

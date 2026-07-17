@@ -1,0 +1,24 @@
+schema_version: 1
+id: stream-processing
+title: 流处理
+primary_family: streaming-analytics-observability
+required: true
+status: draft
+dimensions:
+  - problem-slo
+  - capacity-cost-skew
+  - contracts-data-invariants
+  - placement-routing-sharding
+  - consistency-ordering-time
+  - cache-index-amplification
+  - async-backpressure-fairness
+  - failure-recovery-disaster
+  - observability-release-evolution
+  - security-privacy-multitenancy
+claims:
+  - id: stream-processing-event-time-progress-requires-a-watermark-policy
+    statement: 无界乱序输入没有天然完成点，事件时间进展必须由水位线、空闲源和迟到策略定义。
+  - id: stream-processing-checkpoint-consistency-is-separate-from-external-effect-exactly-once
+    statement: 一致检查点只覆盖输入位置与算子状态，外部副作用仍需幂等或事务提交边界。
+  - id: stream-processing-backpressure-preserves-bounded-state-by-slowing-admission
+    statement: 下游变慢时继续无界摄入会耗尽队列与状态，背压必须传播到准入或采用显式替代语义。

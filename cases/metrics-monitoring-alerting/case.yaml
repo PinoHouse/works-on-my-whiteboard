@@ -1,0 +1,23 @@
+schema_version: 1
+id: metrics-monitoring-alerting
+title: 指标、监控与告警
+primary_family: streaming-analytics-observability
+required: true
+status: draft
+dimensions:
+  - problem-slo
+  - capacity-cost-skew
+  - contracts-data-invariants
+  - consistency-ordering-time
+  - cache-index-amplification
+  - async-backpressure-fairness
+  - failure-recovery-disaster
+  - observability-release-evolution
+  - security-privacy-multitenancy
+claims:
+  - id: metrics-monitoring-alerting-cardinality-is-a-state-budget
+    statement: 每个新标签集合都会产生持久索引和规则状态，高基数是状态预算而非单纯查询优化问题。
+  - id: metrics-monitoring-alerting-alert-state-is-not-a-stateless-threshold
+    statement: 持续时间、抑制、恢复与通知去重要求按告警指纹保存可恢复状态。
+  - id: metrics-monitoring-alerting-scrape-gap-is-not-zero
+    statement: 缺样可能来自采集失败或标签变化，不能一律解释为零值或服务健康。
