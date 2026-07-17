@@ -1,0 +1,25 @@
+schema_version: 1
+id: collaborative-editor
+title: 协同编辑器
+primary_family: realtime-collaboration
+required: true
+status: draft
+dimensions:
+  - problem-slo
+  - capacity-cost-skew
+  - contracts-data-invariants
+  - placement-routing-sharding
+  - consistency-ordering-time
+  - concurrency-transactions-idempotency
+  - cache-index-amplification
+  - async-backpressure-fairness
+  - failure-recovery-disaster
+  - observability-release-evolution
+  - security-privacy-multitenancy
+claims:
+  - id: collaborative-editor-convergence-is-not-a-single-arrival-order
+    statement: 协同编辑的正确目标是在定义的并发规则下让相同操作集合收敛，而不是把网关到达顺序当作天然总序。
+  - id: collaborative-editor-operation-identity-and-context-prevent-replay-duplication
+    statement: 稳定操作 ID 与因果上下文用于区分重放、并发和基于过期版本的编辑。
+  - id: collaborative-editor-compaction-must-preserve-offline-merge-meaning
+    statement: 压缩历史必须保留仍被允许回归的离线操作所需语义，否则重放会改变文档或无法合并。

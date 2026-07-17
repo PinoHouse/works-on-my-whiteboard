@@ -1,0 +1,25 @@
+schema_version: 1
+id: chat-messenger
+title: 聊天与即时通信
+primary_family: realtime-collaboration
+required: true
+status: draft
+dimensions:
+  - problem-slo
+  - capacity-cost-skew
+  - contracts-data-invariants
+  - placement-routing-sharding
+  - consistency-ordering-time
+  - concurrency-transactions-idempotency
+  - cache-index-amplification
+  - async-backpressure-fairness
+  - failure-recovery-disaster
+  - observability-release-evolution
+  - security-privacy-multitenancy
+claims:
+  - id: chat-messenger-order-is-per-conversation-not-global
+    statement: 持久、可恢复的消息顺序由单个会话的提交序列定义，跨会话墙钟时间不能提供全局因果顺序。
+  - id: chat-messenger-commit-and-device-delivery-are-different-acknowledgements
+    statement: 服务端持久提交、设备收到实时帧和用户实际阅读是三个不同事实，前者不能证明后两者。
+  - id: chat-messenger-client-message-id-is-required-for-ambiguous-send-retry
+    statement: 发送超时后只有稳定客户端消息 ID 才能让服务把同一发送重试与一条新消息区分。

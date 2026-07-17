@@ -1,0 +1,23 @@
+schema_version: 1
+id: notification-delivery
+title: 通知投递
+primary_family: realtime-collaboration
+required: true
+status: draft
+dimensions:
+  - problem-slo
+  - capacity-cost-skew
+  - contracts-data-invariants
+  - consistency-ordering-time
+  - concurrency-transactions-idempotency
+  - async-backpressure-fairness
+  - failure-recovery-disaster
+  - observability-release-evolution
+  - security-privacy-multitenancy
+claims:
+  - id: notification-delivery-policy-selection-precedes-channel-attempts
+    statement: 通知必须先由可审计的偏好、频控、优先级和过期策略决定可用渠道，失败 worker 不能临时改写用户策略。
+  - id: notification-delivery-provider-acceptance-is-not-user-attention
+    statement: 渠道提供方接受一次投递只证明其接管尝试，不证明终端展示、用户注意或用户已读。
+  - id: notification-delivery-deduplication-is-scoped-by-business-semantics
+    statement: 通知去重必须绑定业务对象、提醒类型和有效窗口，相同文本不等于同一提醒。

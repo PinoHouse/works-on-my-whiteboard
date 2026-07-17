@@ -1,0 +1,24 @@
+schema_version: 1
+id: video-conferencing
+title: 视频会议
+primary_family: realtime-collaboration
+required: true
+status: draft
+dimensions:
+  - problem-slo
+  - capacity-cost-skew
+  - contracts-data-invariants
+  - placement-routing-sharding
+  - consistency-ordering-time
+  - cache-index-amplification
+  - async-backpressure-fairness
+  - failure-recovery-disaster
+  - observability-release-evolution
+  - security-privacy-multitenancy
+claims:
+  - id: video-conferencing-media-deadline-dominates-reliable-complete-delivery
+    statement: 互动媒体必须在播放截止前到达，迟到的完整帧通常不如及时跳过缺失帧。
+  - id: video-conferencing-topology-is-bounded-by-participant-uplink-and-forwarding-fanout
+    statement: mesh 受端侧上行约束，SFU 受集中转发扇出约束，拓扑选择必须随参与人数和带宽变化。
+  - id: video-conferencing-control-plane-membership-does-not-prove-media-reachability
+    statement: 控制面加入或信令成功只证明权限和协商状态，不能证明媒体路径可达或可听见。

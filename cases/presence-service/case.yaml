@@ -1,0 +1,24 @@
+schema_version: 1
+id: presence-service
+title: 在线状态服务
+primary_family: realtime-collaboration
+required: true
+status: draft
+dimensions:
+  - problem-slo
+  - capacity-cost-skew
+  - contracts-data-invariants
+  - placement-routing-sharding
+  - consistency-ordering-time
+  - cache-index-amplification
+  - async-backpressure-fairness
+  - failure-recovery-disaster
+  - observability-release-evolution
+  - security-privacy-multitenancy
+claims:
+  - id: presence-service-online-is-a-leased-observation-not-a-delivery-guarantee
+    statement: 在线状态只是未过期租约支持的近期观测，不能证明用户正在看屏幕、设备可达或消息已读。
+  - id: presence-service-session-epoch-fences-stale-disconnects
+    statement: 会话世代必须拒绝旧连接迟到的关闭或心跳，避免其覆盖已经重连的新会话。
+  - id: presence-service-heartbeat-interval-trades-freshness-for-amplification
+    statement: 缩短心跳间隔可收紧离线检测窗口，却会线性放大租约写入和关系广播。

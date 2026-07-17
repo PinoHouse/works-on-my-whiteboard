@@ -1,0 +1,25 @@
+schema_version: 1
+id: live-comments
+title: 实时评论
+primary_family: realtime-collaboration
+required: true
+status: draft
+dimensions:
+  - problem-slo
+  - capacity-cost-skew
+  - contracts-data-invariants
+  - placement-routing-sharding
+  - consistency-ordering-time
+  - concurrency-transactions-idempotency
+  - cache-index-amplification
+  - async-backpressure-fairness
+  - failure-recovery-disaster
+  - observability-release-evolution
+  - security-privacy-multitenancy
+claims:
+  - id: live-comments-durable-room-order-and-live-fanout-have-different-contracts
+    statement: 房间持久评论可按序补拉，而巨大观众集合中的实时滚屏只能提供有界、可丢失的扇出体验。
+  - id: live-comments-slow-viewers-must-not-create-unbounded-per-viewer-backlog
+    statement: 慢观众不能拥有无界可靠积压，否则单个连接会放大全局内存和尾延迟。
+  - id: live-comments-moderation-version-is-part-of-visibility
+    statement: 评论可见性由当前审核版本共同决定，旧广播不得绕过撤回、封禁或隐藏裁决。

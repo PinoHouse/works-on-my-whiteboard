@@ -1,0 +1,23 @@
+schema_version: 1
+id: webhook-delivery
+title: Webhook 投递
+primary_family: realtime-collaboration
+required: true
+status: draft
+dimensions:
+  - problem-slo
+  - capacity-cost-skew
+  - contracts-data-invariants
+  - consistency-ordering-time
+  - concurrency-transactions-idempotency
+  - async-backpressure-fairness
+  - failure-recovery-disaster
+  - observability-release-evolution
+  - security-privacy-multitenancy
+claims:
+  - id: webhook-delivery-timeout-requires-at-least-once-at-the-callback-boundary
+    statement: 回调超时无法辨别消费者是否已处理，因此不静默丢事件的投递边界只能承诺至少一次尝试。
+  - id: webhook-delivery-exactly-once-requires-consumer-owned-deduplication
+    statement: 消费者副作用是否重复只能由消费者以稳定事件 ID 在自己的事务中去重。
+  - id: webhook-delivery-outbox-couples-business-commit-to-recoverable-intent
+    statement: 业务变化与待回调意图必须在同一提交边界写入 outbox，否则崩溃窗口会永久漏回调。
