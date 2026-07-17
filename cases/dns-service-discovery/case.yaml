@@ -1,0 +1,23 @@
+schema_version: 1
+id: dns-service-discovery
+title: DNS 与服务发现
+primary_family: addressing-traffic
+required: true
+status: draft
+dimensions:
+  - problem-slo
+  - capacity-cost-skew
+  - contracts-data-invariants
+  - placement-routing-sharding
+  - consistency-ordering-time
+  - cache-index-amplification
+  - failure-recovery-disaster
+  - observability-release-evolution
+  - security-privacy-multitenancy
+claims:
+  - id: dns-service-discovery-ttl-is-a-staleness-contract-not-a-health-check
+    statement: DNS TTL 只限制缓存答案的复用时间，不证明端点在 TTL 内仍健康；端点故障检测与答案传播是两条独立延迟链。
+  - id: dns-service-discovery-cannot-guarantee-immediate-withdrawal-through-cached-dns
+    statement: 只要客户端或递归器可在 TTL 内复用旧答案，权威端点摘除就不能立即阻止所有新连接命中旧端点。
+  - id: dns-service-discovery-endpoint-generation-prevents-partial-membership-answers
+    statement: 以 generation 原子发布完整端点集合，可避免注册和摘除并发时把不同版本的成员拼成一个从未存在过的答案。

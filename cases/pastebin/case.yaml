@@ -1,0 +1,22 @@
+schema_version: 1
+id: pastebin
+title: 文本分享服务
+primary_family: addressing-traffic
+required: true
+status: draft
+dimensions:
+  - problem-slo
+  - capacity-cost-skew
+  - contracts-data-invariants
+  - cache-index-amplification
+  - consistency-ordering-time
+  - failure-recovery-disaster
+  - observability-release-evolution
+  - security-privacy-multitenancy
+claims:
+  - id: pastebin-cache-without-revocation-version-can-serve-deleted-content
+    statement: 只按 TTL 缓存正文而不校验撤销版本时，删除成功与边缘停止可读之间没有可声明的上界。
+  - id: pastebin-immutable-content-decouples-read-scaling-from-write-coordination
+    statement: 将已发布正文设为不可变版本，可把热门读取扩展为缓存分发；可编辑性则必须通过新版本与指针原子切换支付协调和失效成本。
+  - id: pastebin-expiry-must-be-enforced-at-authoritative-read-boundary
+    statement: 仅依赖异步清理删除过期对象不能保证到期后不可读，权威读路径必须比较当前时间与对象到期状态。

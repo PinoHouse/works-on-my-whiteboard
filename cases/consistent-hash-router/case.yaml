@@ -1,0 +1,23 @@
+schema_version: 1
+id: consistent-hash-router
+title: 一致性哈希路由器
+primary_family: addressing-traffic
+required: true
+status: draft
+dimensions:
+  - problem-slo
+  - capacity-cost-skew
+  - contracts-data-invariants
+  - placement-routing-sharding
+  - consistency-ordering-time
+  - cache-index-amplification
+  - failure-recovery-disaster
+  - observability-release-evolution
+  - security-privacy-multitenancy
+claims:
+  - id: consistent-hash-router-generation-skew-can-create-dual-writers
+    statement: 一致性哈希仅在所有参与者使用同一成员快照时给出确定映射；generation 不一致时，对同一可写 key 的路由分歧会直接形成双 owner。
+  - id: consistent-hash-router-minimizes-membership-movement-not-load-skew
+    statement: 一致性哈希限制单次成员变化的迁移比例，却不保证键大小、请求频率或热 key 均匀，热点仍可压垮一个 owner。
+  - id: consistent-hash-router-vnode-count-trades-variance-for-control-plane-churn
+    statement: 增加虚拟节点可降低随机区间长度方差，但同时线性增加 ring 描述、变更计算和传播的控制面成本。

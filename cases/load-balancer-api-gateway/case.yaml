@@ -1,0 +1,23 @@
+schema_version: 1
+id: load-balancer-api-gateway
+title: 负载均衡器与 API 网关
+primary_family: addressing-traffic
+required: true
+status: draft
+dimensions:
+  - problem-slo
+  - capacity-cost-skew
+  - contracts-data-invariants
+  - placement-routing-sharding
+  - concurrency-transactions-idempotency
+  - async-backpressure-fairness
+  - failure-recovery-disaster
+  - observability-release-evolution
+  - security-privacy-multitenancy
+claims:
+  - id: load-balancer-api-gateway-retry-without-idempotency-key-amplifies-ambiguous-writes
+    statement: 网关在不知道后端是否已提交时重试非幂等写入，至少会在“已提交但响应丢失”的执行中制造重复副作用风险。
+  - id: load-balancer-api-gateway-health-based-selection-does-not-prove-request-capacity
+    statement: 健康检查只能说明端点在检查时可达，不能证明它有足够队列、连接或依赖容量接受下一次请求；选择算法必须纳入过载信号和隔离策略。
+  - id: load-balancer-api-gateway-policy-version-must-travel-with-routing-decision
+    statement: 策略热更新若不携带版本，拒绝、授权和路由异常便无法区分代码故障与配置切换，且无法可靠回滚。

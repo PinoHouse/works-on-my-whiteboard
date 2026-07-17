@@ -1,0 +1,21 @@
+schema_version: 1
+id: distributed-id
+title: 分布式 ID 生成器
+primary_family: addressing-traffic
+required: true
+status: draft
+dimensions:
+  - problem-slo
+  - capacity-cost-skew
+  - contracts-data-invariants
+  - consistency-ordering-time
+  - concurrency-transactions-idempotency
+  - failure-recovery-disaster
+  - observability-release-evolution
+claims:
+  - id: distributed-id-worker-identity-must-be-fenced-before-local-generation
+    statement: 本地递增 sequence 只有在 worker 身份在任一时刻不被两个存活生成器共同使用时才能推出全局唯一；租约过期而未 fencing 的旧实例会破坏该前提。
+  - id: distributed-id-clock-regression-cannot-preserve-availability-and-monotonic-time-encoding
+    statement: 当物理时钟回退且 ID 必须编码单调时间时，系统只能等待或拒绝、改用逻辑时间，或允许时间字段倒退，三者不能同时避免。
+  - id: distributed-id-sequence-width-bounds-per-worker-burst-rate
+    statement: 固定 sequence 位宽把单 worker、单时间片的可发号突发硬性限制为 2^s，扩机器不解决单个被错误路由的热点。
