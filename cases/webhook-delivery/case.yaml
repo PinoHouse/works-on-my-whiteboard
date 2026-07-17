@@ -23,3 +23,5 @@ claims:
     statement: 业务变化与待回调意图必须在同一提交边界写入 outbox，否则崩溃窗口会永久漏回调。
   - id: webhook-delivery-signature-binds-the-exact-versioned-event
     statement: Webhook 签名必须绑定精确 body 或其摘要以及事件 ID、时间戳、schema 版本和密钥世代，接收方还必须校验时间窗与重放。
+  - id: webhook-delivery-endpoint-revocation-must-fence-real-egress
+    statement: 端点删除或轮换必须在实际出站 send gate fence 旧 generation，并等待 gate ACK 或可强制短租约失效后才提交；已经跨过 HTTP 边界的数据无法召回。

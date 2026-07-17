@@ -22,3 +22,5 @@ claims:
     statement: 发布成功只证明事件进入主题保留边界，不证明任何订阅端点已经处理。
   - id: pubsub-filter-version-is-part-of-delivery-semantics
     statement: 历史事件是否匹配必须由可审计的过滤版本裁决，重试不能临时套用最新规则。
+  - id: pubsub-subscription-deletion-must-fence-push-egress
+    statement: 订阅删除必须提升 delivery generation、立即拒绝新 Pull，并等待实际 push egress gate ACK fence 或可强制短租约失效后才提交；已经跨过外部边界的数据无法召回。
