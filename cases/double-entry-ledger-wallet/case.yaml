@@ -1,0 +1,24 @@
+schema_version: 1
+id: double-entry-ledger-wallet
+title: 复式记账账本与钱包
+primary_family: transactions-contention
+required: true
+status: draft
+dimensions:
+  - problem-slo
+  - capacity-cost-skew
+  - contracts-data-invariants
+  - placement-routing-sharding
+  - consistency-ordering-time
+  - concurrency-transactions-idempotency
+  - cache-index-amplification
+  - failure-recovery-disaster
+  - observability-release-evolution
+  - security-privacy-multitenancy
+claims:
+  - id: double-entry-ledger-wallet-atomic-balanced-postings-are-the-source-of-money-conservation
+    statement: 借贷 posting 只有作为一组原子提交，才能从已提交日志证明资金守恒。
+  - id: double-entry-ledger-wallet-balance-is-a-derived-view-not-an-editable-authority
+    statement: 余额是不可变分录的投影，纠错必须使用反向或调整分录而不是直接覆盖余额。
+  - id: double-entry-ledger-wallet-available-balance-requires-hold-ordering
+    statement: 支付 hold 与新支出必须在同一账户可用余额序列中裁决，否则会承诺超过可动用资金。

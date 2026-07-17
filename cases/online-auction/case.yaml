@@ -1,0 +1,23 @@
+schema_version: 1
+id: online-auction
+title: 在线拍卖
+primary_family: transactions-contention
+required: true
+status: draft
+dimensions:
+  - problem-slo
+  - capacity-cost-skew
+  - contracts-data-invariants
+  - consistency-ordering-time
+  - concurrency-transactions-idempotency
+  - async-backpressure-fairness
+  - failure-recovery-disaster
+  - observability-release-evolution
+  - security-privacy-multitenancy
+claims:
+  - id: online-auction-winner-requires-a-fenced-bid-order-at-close
+    statement: 最高价只有在有效出价集合被关闭栅栏固定后才能确定，不同节点各自判定截止会产生矛盾赢家。
+  - id: online-auction-authorization-is-not-payment-or-settlement
+    statement: 竞拍资金预授权只限制出价资格，不等于成交后的扣款成功或卖家结算。
+  - id: online-auction-anti-sniping-extends-contention-window
+    statement: 反狙击延长改善最后一刻的网络公平，却会推迟赢家确定并扩大热点拍卖的协调窗口。

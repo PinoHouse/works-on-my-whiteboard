@@ -1,0 +1,24 @@
+schema_version: 1
+id: appointment-booking
+title: 预约系统
+primary_family: transactions-contention
+required: true
+status: draft
+dimensions:
+  - problem-slo
+  - capacity-cost-skew
+  - contracts-data-invariants
+  - placement-routing-sharding
+  - consistency-ordering-time
+  - concurrency-transactions-idempotency
+  - async-backpressure-fairness
+  - failure-recovery-disaster
+  - observability-release-evolution
+  - security-privacy-multitenancy
+claims:
+  - id: appointment-booking-overlapping-capacity-needs-one-conditional-owner
+    statement: 相交时段的确认必须经过同一可条件更新的容量权威，否则独立预约行会并发超卖资源能力。
+  - id: appointment-booking-confirmation-is-not-attendance
+    statement: 预约确认只分配未来服务能力，不能证明用户会到场或服务已经履约。
+  - id: appointment-booking-holds-trade-conversion-time-for-sellable-capacity
+    statement: 临时占位减少填写流程中的抢占失败，却会在过期前移除其他用户可购买的有限时段。

@@ -1,0 +1,23 @@
+schema_version: 1
+id: payment-system
+title: 支付系统
+primary_family: transactions-contention
+required: true
+status: draft
+dimensions:
+  - problem-slo
+  - capacity-cost-skew
+  - contracts-data-invariants
+  - consistency-ordering-time
+  - concurrency-transactions-idempotency
+  - async-backpressure-fairness
+  - failure-recovery-disaster
+  - observability-release-evolution
+  - security-privacy-multitenancy
+claims:
+  - id: payment-system-timeout-cannot-distinguish-unsubmitted-from-processed-capture
+    statement: 本地超时不能区分请求未到、处理器已接受但响应丢失和处理器仍在执行，重试不是无副作用操作。
+  - id: payment-system-authorization-capture-and-settlement-are-distinct-promises
+    statement: 授权、捕获与结算是不同承诺，必须以不同状态对订单、用户和财务表达。
+  - id: payment-system-reconciliation-is-a-correctness-path-not-a-reporting-job
+    statement: 同步结果不确定时，外部参考号、回调和批量对账是状态收敛的正确性路径。

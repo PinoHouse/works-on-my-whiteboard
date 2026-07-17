@@ -1,0 +1,23 @@
+schema_version: 1
+id: bank-transfer
+title: 银行转账
+primary_family: transactions-contention
+required: true
+status: draft
+dimensions:
+  - problem-slo
+  - capacity-cost-skew
+  - contracts-data-invariants
+  - consistency-ordering-time
+  - concurrency-transactions-idempotency
+  - async-backpressure-fairness
+  - failure-recovery-disaster
+  - observability-release-evolution
+  - security-privacy-multitenancy
+claims:
+  - id: bank-transfer-debit-credit-and-interbank-settlement-have-different-finality
+    statement: 付款行借记、收款行贷记与跨行清算在不同时间完成，成功声明必须注明最终性层级。
+  - id: bank-transfer-ambiguous-network-outcome-requires-reference-based-reconciliation
+    statement: 跨行报文超时不能证明收款行未处理，必须沿原端到端参考号查询与对账。
+  - id: bank-transfer-return-is-a-new-compensating-event-not-a-delete
+    statement: 已借记或已贷记转账的退回必须记录为可追溯反向资金事件，不能删除原指令。

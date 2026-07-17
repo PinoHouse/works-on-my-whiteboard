@@ -1,0 +1,24 @@
+schema_version: 1
+id: ecommerce-order-inventory
+title: 电商订单与库存
+primary_family: transactions-contention
+required: true
+status: draft
+dimensions:
+  - problem-slo
+  - capacity-cost-skew
+  - contracts-data-invariants
+  - placement-routing-sharding
+  - consistency-ordering-time
+  - concurrency-transactions-idempotency
+  - async-backpressure-fairness
+  - failure-recovery-disaster
+  - observability-release-evolution
+  - security-privacy-multitenancy
+claims:
+  - id: ecommerce-order-inventory-payment-authorization-does-not-own-a-physical-unit
+    statement: 支付授权只说明资金路径可能可用，没有有效库存预留就不能保证订单拥有可拣配实物。
+  - id: ecommerce-order-inventory-reservation-must-bind-order-line-and-expiry
+    statement: 库存预留必须唯一绑定订单行和到期版本，否则延迟事件可能重复释放或重新发货。
+  - id: ecommerce-order-inventory-oversell-control-is-local-to-sku-warehouse-not-order-row
+    statement: 防超卖的可售量判断必须回到同一 SKU 与仓库的分配权威，不能由各订单行独立判断。
