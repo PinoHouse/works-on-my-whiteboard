@@ -14,15 +14,15 @@
 
 ## 客观模型
 
-最小命令为 `PlaceBid(auction, bidder, amount, rule_version, key)`、`Close(auction, expected_epoch)`、`CancelBid` 和 `RecordPayment`。拍卖 owner 保存 `close_at`、`rule_version`、单调 `receive_token/bid_sequence`、最高有效标、关闭 epoch 与 winner；风险系统保存预授权，支付系统保存 capture，结算账本保存对卖家的应付款。出价状态从 RECEIVED 到 VALID，再到 OUTBID 或 WINNING；关闭后固化 WINNER，支付和交付在其后推进。
+最小命令为 `PlaceBid(auction, bidder, amount, rule_version, key)`、`CloseGeneration(auction, expected_epoch, expected_fence_generation)`、`CancelBid` 和 `RecordPayment`。拍卖 owner 保存 `close_at`、`rule_version`、单调 `fence_generation/receive_token/bid_sequence`、最高有效标、关闭 epoch 与 winner；风险系统保存预授权，支付系统保存 capture，结算账本保存对卖家的应付款。每一代从 OPEN 到 SEALED，处理完该代 fence 内全部有效标后，要么因反狙击原子推进截止与代号并回到 OPEN，要么进入 CLOSED 并固化 WINNER；支付和交付在其后推进。
 
 若结束前窗口为 `w` 秒、峰值到达率为 `λ_peak`、单 owner 提交率为 `μ`，窗口积压近似 `Q=max(0,(λ_peak-μ)×w)`。反狙击每次延长 `e` 秒并触发 `k` 次时，最终截止为 `close_at+k×e`。热点是单一明星商品的序列，不应以全站平均 QPS 决定是否多写。
 
-不变量是权威截止前取得接收令牌、位于关闭 fence 之前且通过规则的出价才进入候选集；胜者按金额和确定性 tie-break 唯一；关闭后新标不得改写 winner；预授权、成交、扣款和卖家结算分别记录。单拍卖 owner 的接收令牌、提交序列和时钟是时间与排序权威，边缘倒计时只作用户提示。
+不变量是某个开放世代在权威截止前取得接收令牌、位于该代 fence 以内且通过规则的出价才进入候选集；该代必须处理完全部有效标，才能决定原子延长并开放下一代还是最终关闭。胜者按金额和确定性 tie-break 唯一；只有未延长的世代才能固化 winner，CLOSED 后新标不得改写它；预授权、成交、扣款和卖家结算分别记录。单拍卖 owner 的 fence generation、接收令牌、提交序列和时钟是时间与排序权威，边缘倒计时只作用户提示。
 
 ## 必然约束
 
-[DEDUCED:online-auction-winner-requires-a-fenced-bid-order-at-close] 最高价格只有在有效集合被同一 close fence 固定后才有意义。最小反例是规则规定 24:00:00 截止：节点 X 的时钟为 23:59:59.950，接受 A 的 100 元；节点 Y 的时钟为 24:00:00.020，关闭并宣布 B 的 99 元获胜。两个局部判断无法合并成唯一承诺。从第一笔请求起，PlaceBid 和 Close 就必须路由到单拍卖 owner：owner 在权威 `close_at` 原子封住入口，把封口前已持久接收的最大 `receive_token` 记为 fence；即使 Close 命令因队列积压稍后执行，也先处理完 token 不大于 fence 的有效标，再固化 winner，封口后的 token 一律迟到。客户端和边缘墙钟只能提示剩余时间，不能给出接受承诺。若库存预先切成互不竞争的多个独立拍卖，才可分别关闭。
+[DEDUCED:online-auction-winner-requires-a-fenced-bid-order-at-close] 最高价格只有在有效集合被同一世代的 close fence 固定后才有意义。最小反例是规则规定 24:00:00 截止：节点 X 的时钟为 23:59:59.950，接受会触发反狙击的 A 之 100 元；节点 Y 的时钟为 24:00:00.020，既没看到 A 又关闭并宣布 B 的 99 元获胜。两个局部判断无法合并成唯一承诺。从第一笔请求起，PlaceBid 和 CloseGeneration 就必须路由到单拍卖 owner：owner 在权威 `close_at` 原子封住当前 `fence_generation`，把此前已持久接收的最大 `receive_token` 记为该代 fence；即使关闭任务因队列积压稍后执行，也先处理完 token 不大于 fence 的全部有效标。若其中任何标按固定规则触发反狙击，owner 必须在一个状态事务中推进 `close_at` 与 `fence_generation`、重新开放下一代接收，不能固化 winner；只有当前世代没有延长，才可进入 CLOSED。客户端和边缘墙钟只能提示剩余时间，不能给出接受或关闭承诺。若库存预先切成互不竞争的多个独立拍卖，才可分别关闭。
 
 [DEDUCED:online-auction-authorization-is-not-payment-or-settlement] 风险系统预留 100 元只证明当时允许该用户出价；在关闭前他可能被超过，关闭后 capture 仍可能被拒，卖家结算还取决于交付和争议。若预授权成功就写“已支付”，落败者会留下虚假扣款；若 winner 产生就写“已结算”，平台会提前确认尚未到账的负债。四层状态必须用事件关联而不能互相推断。
 
@@ -30,17 +30,17 @@
 
 ## 从简单方案演进
 
-最简单正确基线是从第一请求起将每个拍卖固定路由到一个 owner：入口持久化单调 `receive_token`，提交出价时校验状态 OPEN、规则版本、金额和当前最高标，写单调 sequence；owner 的权威定时器在 `close_at` 封住接收并记录 token fence，Close 排到执行位时消费 fence 前请求、置 CLOSED 并复制 winner。低负载下数据库行锁或条件事务足够。把出价写到多地日志再按金额异步合并看似可用，却无法解释截止边界和已发送的两个赢家通知。
+最简单正确基线是从第一请求起将每个拍卖固定路由到一个 owner：入口只在当前 `fence_generation` 为 OPEN 时持久化单调 `receive_token`，提交出价时校验规则版本、金额和当前最高标，写单调 sequence；owner 的权威定时器在 `close_at` 把本世代置 SEALED 并记录 token fence。关闭任务消费 fence 内全部请求后，若有有效标触发反狙击，就原子写入新的 `close_at` 与下一 `fence_generation` 并重新置 OPEN；否则才置 CLOSED 并复制 winner。低负载下数据库行锁或条件事务足够。把出价写到多地日志再按金额异步合并看似可用，却无法解释截止边界、延长归属和已发送的两个赢家通知。
 
 第一个待校准指标是结束前六十秒的到达率超过 owner 顺序提交能力的 70%，或 PlaceBid `p99` 超过 300 毫秒。权威路由和接收 fence 始终存在；达到阈值后只扩大入口背压、限制单用户频率，并在预计来不及取得截止前 token 时提前拒绝，而不是这时才切换正确性模型。70% 与 300 毫秒需由压测和用户体验校准，调高会积压过期标，调低会过早牺牲可用吞吐。
 
-第二个待校准指标是 close 后“客户端曾显示可能接受但最终拒绝”的比例超过 0.1%，或边缘时钟相对 owner 偏差超过 50 毫秒。此时收紧页面提示的安全余量、提高时钟偏差告警并减少边缘动画承诺；带 epoch 的权威 Close 仍按既有 fence 裁决，不因指标正常就下放截止权。两个数字是体验告警起点，需按网络和竞拍价值调整。固有成本是跨地域提交延迟与 owner 故障恢复。
+第二个待校准指标是世代封口后“客户端曾显示可能接受但最终拒绝”的比例超过 0.1%，或边缘时钟相对 owner 偏差超过 50 毫秒。此时收紧页面提示的安全余量、提高时钟偏差告警并减少边缘动画承诺；带 epoch 和 generation 的权威关闭仍按既有 fence 裁决，延长后由新一代重新接收，不因指标正常就下放截止权。两个数字是体验告警起点，需按网络和竞拍价值调整。固有成本是跨地域提交延迟与 owner 故障恢复。
 
 没有选择全局序列器，因为不同拍卖之间没有排序不变量。也没有选择“最高金额最后写胜出”，它会丢失同价顺序、撤回与关闭关系；只有无截止、允许持续覆盖且不对中间状态作承诺的报价板才适合该模型。
 
 ## 设计决定
 
-本设计按 `auction_id` 分区，从拍卖开放起就把 PlaceBid、规则延长和 Close 路由给当前 epoch 的唯一 owner。入口只做静态鉴权；owner 在持久接收时发 `receive_token`，最终规则检查后响应带 sequence，通知是该提交的派生结果。到权威 `close_at` 时 owner 先封住入口并记录 fence，即使 Close 在队列中延迟，也完成 fence 内请求后才固化 winner 和最终 close_at；重试 Close 返回同一结果。leader 失联时暂停该拍卖的关闭与新标，由新 epoch 追平接收日志和 fence 后继续。
+本设计按 `auction_id` 分区，从拍卖开放起就把 PlaceBid、规则延长和 CloseGeneration 路由给当前 epoch 的唯一 owner。入口只做静态鉴权；owner 仅在当前 generation 为 OPEN 时持久化 `receive_token`，最终规则检查后响应带 sequence，通知是该提交的派生结果。到权威 `close_at` 时 owner 以条件事务把本代置 SEALED 并记录 fence；关闭任务即使在队列中延迟，也必须完成 fence 内全部请求后再求值反狙击规则。有延长时同一事务写入新 `close_at`、递增 `fence_generation` 并重新置 OPEN；无延长时才写最终 close_at、winner 与 CLOSED。重试携带旧 generation 会返回该代的既有延长或关闭结果。leader 失联时暂停该拍卖的代际决策与新标，由新 epoch 追平接收日志、SEALED fence 和延长决定后继续。
 
 风险预授权只授予出价资格，可以按最大代理价预留；winner 产生后用原支付意图 capture，超时保持 PAYMENT_PENDING 并按外部参考号对账。卖家应付款直到交付或争议窗口结束才进入结算账本。通知乱序时客户端按 auction version 丢弃旧的“你领先了”，不能用通知到达顺序改写成交。
 
@@ -48,16 +48,16 @@
 
 ## 运行与演进
 
-关键 SLI 包括有效标提交延迟、结束窗口队列深度、close fence 到赢家通知延迟、迟到拒绝比例、重复 winner 数、规则版本拒绝、预授权占用和支付待定年龄。过载时先降级观众实时动画与次要通知，再限制每竞拍者频率，最后拒绝预计不能在截止前提交的新标；已进入 owner 序列的 Close 不可被通知洪峰阻塞。
+关键 SLI 包括有效标提交延迟、结束窗口队列深度、每代 fence 到延长或关闭决定的延迟、迟到拒绝比例、重复 winner 数、规则版本拒绝、预授权占用和支付待定年龄。过载时先降级观众实时动画与次要通知，再限制每竞拍者频率，最后拒绝预计不能在本代截止前取得 token 的新标；已 SEALED 世代的全量处理和延长/关闭决定不可被通知洪峰阻塞。
 
-故障时间线：23:59:59.900 A 的 100 元标在 owner 持久接收为 token 80；24:00:00.000 权威定时器封口并记录 fence 80，但 Close 因队列积压尚未执行；24:00:00.010 边缘仍显示一秒并送来 B，owner 只能给 token 81 且标迟到；24:00:00.020 owner 处理 A、提交 sequence 81，再执行 Close。A 是候选，B 无论客户端发送时间如何都不能越过 fence。再注入封口后 leader 崩溃，新 epoch 必须恢复 fence 80 后继续，不能重新开放接收。
+故障时间线：23:59:59.900 A 的 100 元标在 generation 7 持久接收为 token 80，且按固定规则会触发三十秒反狙击；24:00:00.000 权威定时器把 generation 7 置 SEALED 并记录 fence 80，但关闭任务因队列积压尚未求值；24:00:00.010 B 到达 SEALED 世代，只能收到“世代决策中”而不能取得 token；24:00:00.020 owner 处理完 fence 80 内全部有效标，确认 A 触发延长，于同一事务把 `close_at` 推进至 24:00:30、`fence_generation` 推进为 8 并重新置 OPEN，绝不能在 generation 7 宣布 winner；24:00:00.030 B 以新代重试并取得 token 81。到 24:00:30，owner 再封住 generation 8；只有该代全部有效标均不触发延长，才进入 CLOSED。再注入 generation 7 封口后 leader 崩溃，新 epoch 必须恢复 fence 80 并完成 A 的延长决定，不能跳过求值直接关闭或把旧代无条件重开。
 
 新 tie-break 或反狙击规则以 rule version 固定在拍卖创建时，先对影子拍卖重放再灰度；回滚继续理解旧新版本。分区迁移以 epoch fencing 禁止双 owner。日志保护竞拍者身份和资金限额，只向公开页面暴露匿名序列；审计保留规则、提交顺序、关闭和付款引用，使争议能重放。
 
 ## 面试考察本质
 
-这题考察的是：给定“权威截止前收到的有效最高标产生唯一赢家”的不变量，因为边缘节点不知道其他出价顺序、Close 可能排队且本地时钟不能共同宣布关闭，候选人应从第一请求起推导出单拍卖 owner、接收令牌与 fenced 全序，并在低延迟受理、最后一刻公平和热点协调之间按业务规则取舍。
+这题考察的是：给定“每个世代 fence 内全部有效标先决定是否延长，只有不延长的世代才能产生唯一赢家”的不变量，因为边缘节点不知道其他出价顺序、关闭任务可能排队且本地时钟不能共同宣布延长或关闭，候选人应从第一请求起推导出单拍卖 owner、接收令牌、fence generation 与原子代际迁移，并在低延迟受理、最后一刻公平和热点协调之间按业务规则取舍。
 
-优秀回答会区分出价意图、资金资格、成交、扣款和结算，画 PlaceBid 与 Close 的同一序列，给出跨节点截止反例，并让反狙击延长成为明确规则事件。常见误区是以客户端时间排序、用消息到达通知顺序选 winner、把预授权当付款，或为了吞吐让同一拍卖多主写。
+优秀回答会区分出价意图、资金资格、成交、扣款和结算，画 PlaceBid、世代封口、延长与最终关闭的同一序列，给出跨节点截止反例，并让反狙击成为处理完当前 fence 后的原子代际事件。常见误区是封住旧 fence 就立即宣布 winner、延长时忘记重新开放新 generation、以客户端时间排序、把预授权当付款，或为了吞吐让同一拍卖多主写。
 
-二十分钟应讲清有效标、tie-break 和 close fence；四十分钟加入代理出价、预授权、反狙击与 leader 恢复；六十分钟再讨论争议审计、分区迁移、通知扇出和卖家结算。追问应聚焦 fence 前最后一条日志是否复制，要求候选人解释两种结果都如何保持唯一。
+二十分钟应讲清有效标、tie-break 和分代 close fence；四十分钟加入代理出价、预授权、反狙击的 SEALED-to-OPEN 迁移与 leader 恢复；六十分钟再讨论争议审计、分区迁移、通知扇出和卖家结算。追问应聚焦 fence 前最后一条日志是否复制，要求候选人解释延长与关闭两种结果都如何保持唯一。
