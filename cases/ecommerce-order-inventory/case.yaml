@@ -17,8 +17,8 @@ dimensions:
   - security-privacy-multitenancy
 claims:
   - id: ecommerce-order-inventory-payment-authorization-does-not-own-a-physical-unit
-    statement: 支付授权只说明资金路径可能可用，没有有效库存预留就不能保证订单拥有可拣配实物。
+    statement: 支付授权只说明资金路径可能可用，只有有效 reservation 或不再过期的 committed allocation 才拥有可拣配实物。
   - id: ecommerce-order-inventory-reservation-must-bind-order-line-and-expiry
-    statement: 库存预留必须唯一绑定订单行和到期版本，否则延迟事件可能重复释放或重新发货。
+    statement: 临时预留必须唯一绑定订单行和到期版本，并在 capture 前原子转为不再过期的 committed allocation。
   - id: ecommerce-order-inventory-oversell-control-is-local-to-sku-warehouse-not-order-row
     statement: 防超卖的可售量判断必须回到同一 SKU 与仓库的分配权威，不能由各订单行独立判断。

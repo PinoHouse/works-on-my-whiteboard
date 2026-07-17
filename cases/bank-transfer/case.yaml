@@ -18,6 +18,6 @@ claims:
   - id: bank-transfer-debit-credit-and-interbank-settlement-have-different-finality
     statement: 付款行借记、收款行贷记与跨行清算在不同时间完成，成功声明必须注明最终性层级。
   - id: bank-transfer-ambiguous-network-outcome-requires-reference-based-reconciliation
-    statement: 跨行报文超时不能证明收款行未处理，必须沿原端到端参考号查询与对账。
+    statement: 跨行报文超时不能证明收款行未处理；只有外部网络和收款行按稳定端到端参考号幂等时才可重放，否则只能查询或人工处置。
   - id: bank-transfer-return-is-a-new-compensating-event-not-a-delete
     statement: 已借记或已贷记转账的退回必须记录为可追溯反向资金事件，不能删除原指令。

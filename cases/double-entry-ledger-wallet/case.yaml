@@ -19,6 +19,6 @@ claims:
   - id: double-entry-ledger-wallet-atomic-balanced-postings-are-the-source-of-money-conservation
     statement: 借贷 posting 只有作为一组原子提交，才能从已提交日志证明资金守恒。
   - id: double-entry-ledger-wallet-balance-is-a-derived-view-not-an-editable-authority
-    statement: 余额是不可变分录的投影，纠错必须使用反向或调整分录而不是直接覆盖余额。
+    statement: 余额是不可变分录的投影，必须用 watermark 守住一秒可见承诺，纠错仍使用反向或调整分录而不是覆盖余额。
   - id: double-entry-ledger-wallet-available-balance-requires-hold-ordering
     statement: 支付 hold 与新支出必须在同一账户可用余额序列中裁决，否则会承诺超过可动用资金。

@@ -8,6 +8,7 @@ dimensions:
   - problem-slo
   - capacity-cost-skew
   - contracts-data-invariants
+  - placement-routing-sharding
   - consistency-ordering-time
   - concurrency-transactions-idempotency
   - async-backpressure-fairness
@@ -16,7 +17,7 @@ dimensions:
   - security-privacy-multitenancy
 claims:
   - id: online-auction-winner-requires-a-fenced-bid-order-at-close
-    statement: 最高价只有在有效出价集合被关闭栅栏固定后才能确定，不同节点各自判定截止会产生矛盾赢家。
+    statement: 每次出价与关闭从第一请求起就必须路由到同一权威 owner，由其截止栅栏和接收令牌固定候选集合。
   - id: online-auction-authorization-is-not-payment-or-settlement
     statement: 竞拍资金预授权只限制出价资格，不等于成交后的扣款成功或卖家结算。
   - id: online-auction-anti-sniping-extends-contention-window
