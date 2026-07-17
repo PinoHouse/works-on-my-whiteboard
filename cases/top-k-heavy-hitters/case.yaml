@@ -13,6 +13,7 @@ dimensions:
   - async-backpressure-fairness
   - failure-recovery-disaster
   - observability-release-evolution
+  - security-privacy-multitenancy
 claims:
   - id: top-k-heavy-hitters-rank-is-an-estimate-with-window-and-error-semantics
     statement: Top-K 是带窗口、过滤版本和误差界的派生估计，不是事件日志的权威顺序。

@@ -17,7 +17,7 @@ dimensions:
   - security-privacy-multitenancy
 claims:
   - id: ad-serving-ranking-budget-reservation-is-authoritative-while-auction-score-is-derived
-    statement: 竞价分只能在已通过政策、频控和预算保留的候选中排序，最高分本身不授予花费权。
+    statement: 硬资格过滤后拍卖先产生临时赢家与价格，临时赢家只有成功保留频控槽位和对应预算才可展示，失败必须顺延候选。
   - id: ad-serving-ranking-cannot-simultaneously-use-stale-edge-budget-and-guarantee-no-overspend
     statement: 多个边缘依据陈旧余额独立获胜时无法同时保证零超支，必须协调保留、限制租约或接受明确误差界。
   - id: ad-serving-ranking-fairness-and-policy-constraints-are-feasibility-filters-not-score-features
