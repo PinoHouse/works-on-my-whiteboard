@@ -14,8 +14,8 @@ dimensions:
   - observability-release-evolution
   - security-privacy-multitenancy
 claims:
-  - id: pastebin-cache-without-revocation-version-can-serve-deleted-content
-    statement: 只按 TTL 缓存正文而不校验撤销版本时，删除成功与边缘停止可读之间没有可声明的上界。
+  - id: pastebin-revocation-version-without-refresh-cannot-bound-early-deletion
+    statement: 有限 TTL 能把删除后的最长陈旧读取限制在剩余 TTL 内，但缓存仅携带 revocation_version 而不周期刷新或确认时，无法自行获知新版，也不能承诺比该剩余 TTL 更短的删除窗口。
   - id: pastebin-immutable-content-decouples-read-scaling-from-write-coordination
     statement: 将已发布正文设为不可变版本，可把热门读取扩展为缓存分发；可编辑性则必须通过新版本与指针原子切换支付协调和失效成本。
   - id: pastebin-expiry-must-be-enforced-at-authoritative-read-boundary

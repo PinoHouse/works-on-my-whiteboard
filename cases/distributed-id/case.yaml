@@ -12,9 +12,10 @@ dimensions:
   - concurrency-transactions-idempotency
   - failure-recovery-disaster
   - observability-release-evolution
+  - security-privacy-multitenancy
 claims:
-  - id: distributed-id-worker-identity-must-be-fenced-before-local-generation
-    statement: 本地递增 sequence 只有在 worker 身份在任一时刻不被两个存活生成器共同使用时才能推出全局唯一；租约过期而未 fencing 的旧实例会破坏该前提。
+  - id: distributed-id-lease-epoch-must-be-encoded-before-worker-id-reuse
+    statement: worker ID 可复用时，协调器必须为每次授予分配不复用的单调 lease_epoch 并把它编码进 ID；仅在下游校验 fencing token 不能保证 NextID 响应本身全局唯一。
   - id: distributed-id-clock-regression-cannot-preserve-availability-and-monotonic-time-encoding
     statement: 当物理时钟回退且 ID 必须编码单调时间时，系统只能等待或拒绝、改用逻辑时间，或允许时间字段倒退，三者不能同时避免。
   - id: distributed-id-sequence-width-bounds-per-worker-burst-rate

@@ -20,4 +20,4 @@ claims:
   - id: load-balancer-api-gateway-health-based-selection-does-not-prove-request-capacity
     statement: 健康检查只能说明端点在检查时可达，不能证明它有足够队列、连接或依赖容量接受下一次请求；选择算法必须纳入过载信号和隔离策略。
   - id: load-balancer-api-gateway-policy-version-must-travel-with-routing-decision
-    statement: 策略热更新若不携带版本，拒绝、授权和路由异常便无法区分代码故障与配置切换，且无法可靠回滚。
+    statement: 网关必须先用规范化 method/path 从同一不可变策略快照确定 route classification，再执行该路由的认证、授权、配额与准入；策略版本须与整次决策同行，后端 endpoint 只能在这些步骤之后选择。
