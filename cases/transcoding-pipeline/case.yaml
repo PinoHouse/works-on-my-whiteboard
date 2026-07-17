@@ -1,0 +1,23 @@
+schema_version: 1
+id: transcoding-pipeline
+title: 转码流水线
+primary_family: media-delivery
+required: true
+status: draft
+dimensions:
+  - problem-slo
+  - capacity-cost-skew
+  - contracts-data-invariants
+  - consistency-ordering-time
+  - concurrency-transactions-idempotency
+  - cache-index-amplification
+  - async-backpressure-fairness
+  - failure-recovery-disaster
+  - observability-release-evolution
+claims:
+  - id: transcoding-pipeline-dag-dependencies-define-runnable-work
+    statement: 转码任务只有在当前 DAG revision 的全部必需父产物完成后才可运行，队列到达顺序不能替代依赖关系。
+  - id: transcoding-pipeline-attempt-fencing-must-reject-late-workers
+    statement: 超时重试或推测执行后必须用 attempt fencing 拒绝旧 worker 的迟到提交，否则较旧结果会覆盖当前产物。
+  - id: transcoding-pipeline-release-must-isolate-partial-completion
+    statement: 各 rendition 分别完成不等于标题可播放，只有校验通过的 release manifest 原子发布才能隔离部分完成。

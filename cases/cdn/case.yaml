@@ -1,0 +1,25 @@
+schema_version: 1
+id: cdn
+title: 内容分发网络
+primary_family: media-delivery
+required: true
+status: draft
+dimensions:
+  - problem-slo
+  - capacity-cost-skew
+  - contracts-data-invariants
+  - placement-routing-sharding
+  - consistency-ordering-time
+  - concurrency-transactions-idempotency
+  - cache-index-amplification
+  - async-backpressure-fairness
+  - failure-recovery-disaster
+  - observability-release-evolution
+  - security-privacy-multitenancy
+claims:
+  - id: cdn-cache-key-must-cover-response-variance
+    statement: 所有会改变响应字节或访问资格的输入都必须进入缓存键或命中后校验，否则边缘会把一个请求的结果错误交给另一个请求。
+  - id: cdn-purge-is-a-distributed-propagation-process
+    statement: 失效与 purge 是跨边缘传播并收集确认的过程，控制面接受操作不等于全球副本在同一时刻消失。
+  - id: cdn-stale-availability-must-not-cross-authorization-revocation
+    statement: stale-while-error 可以延长公开内容可用性，但不能越过私有对象的授权撤销代际继续服务。

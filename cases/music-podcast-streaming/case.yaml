@@ -1,0 +1,24 @@
+schema_version: 1
+id: music-podcast-streaming
+title: 音乐与播客流媒体
+primary_family: media-delivery
+required: true
+status: draft
+dimensions:
+  - problem-slo
+  - capacity-cost-skew
+  - contracts-data-invariants
+  - consistency-ordering-time
+  - concurrency-transactions-idempotency
+  - cache-index-amplification
+  - async-backpressure-fairness
+  - failure-recovery-disaster
+  - observability-release-evolution
+  - security-privacy-multitenancy
+claims:
+  - id: music-podcast-streaming-continuity-outranks-peak-bitrate
+    statement: 对连续音频，避免可感知中断通常比维持最高码率更重要，播放器应在缓冲耗尽前切到同一时间轴的较低 rendition。
+  - id: music-podcast-streaming-offline-availability-conflicts-with-instant-revocation
+    statement: 设备完全离线时无法获知刚发生的撤权，因此离线可播窗口与即时撤权不能同时成立，只能用短期许可证限制暴露。
+  - id: music-podcast-streaming-progress-merge-needs-session-causality
+    statement: 跨设备播放进度不能简单采用最后到达者，合并必须区分同一会话重试、主动回听与彼此不可见的并发设备。

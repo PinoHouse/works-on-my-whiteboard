@@ -1,0 +1,23 @@
+schema_version: 1
+id: large-file-transfer
+title: 大文件传输
+primary_family: media-delivery
+required: true
+status: draft
+dimensions:
+  - problem-slo
+  - capacity-cost-skew
+  - contracts-data-invariants
+  - consistency-ordering-time
+  - concurrency-transactions-idempotency
+  - async-backpressure-fairness
+  - failure-recovery-disaster
+  - observability-release-evolution
+  - security-privacy-multitenancy
+claims:
+  - id: large-file-transfer-resume-state-must-bind-to-content-identity
+    statement: 断点记录必须绑定上传会话代际、块位置与预期摘要，单独记录字节偏移会把另一版本文件的字节拼入当前对象。
+  - id: large-file-transfer-chunk-success-does-not-imply-file-success
+    statement: 所有块分别上传成功仍不代表文件成功，只有完整块集合与整体摘要校验后的原子 manifest 提交才能发布对象。
+  - id: large-file-transfer-parallelism-is-bounded-by-bottleneck-and-fairness
+    statement: 增加并行块只能利用尚未饱和的链路，超过最窄带宽或租户公平份额后只会放大重传、内存和排队。

@@ -1,0 +1,23 @@
+schema_version: 1
+id: video-on-demand
+title: 视频点播
+primary_family: media-delivery
+required: true
+status: draft
+dimensions:
+  - problem-slo
+  - capacity-cost-skew
+  - contracts-data-invariants
+  - consistency-ordering-time
+  - cache-index-amplification
+  - async-backpressure-fairness
+  - failure-recovery-disaster
+  - observability-release-evolution
+  - security-privacy-multitenancy
+claims:
+  - id: video-on-demand-manifest-publication-must-not-expose-partial-renditions
+    statement: 点播标题的发布指针只有在某一版本 manifest 引用的全部必需分片可读后才能切换，否则一次播放会观察到部分发布。
+  - id: video-on-demand-abr-can-only-adapt-among-published-compatible-renditions
+    statement: 自适应码率只能在同一已发布时间轴的兼容 rendition 间切换，带宽估计不能修复跨版本缺片或时间戳不连续。
+  - id: video-on-demand-startup-and-steady-state-throughput-are-separate-budgets
+    statement: 首帧启动受清单与首批分片往返支配，稳态卡顿受持续可用吞吐与缓冲消耗支配，平均带宽不能同时代表两者。

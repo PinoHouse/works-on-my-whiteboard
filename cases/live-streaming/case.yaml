@@ -1,0 +1,24 @@
+schema_version: 1
+id: live-streaming
+title: 直播
+primary_family: media-delivery
+required: true
+status: draft
+dimensions:
+  - problem-slo
+  - capacity-cost-skew
+  - contracts-data-invariants
+  - placement-routing-sharding
+  - consistency-ordering-time
+  - concurrency-transactions-idempotency
+  - cache-index-amplification
+  - async-backpressure-fairness
+  - failure-recovery-disaster
+  - observability-release-evolution
+claims:
+  - id: live-streaming-ingest-epoch-must-fence-a-recovered-old-publisher
+    statement: 频道切换摄取节点后必须以递增 epoch 拒绝旧发布者的迟到分片，否则同一序号会拥有两个事实源。
+  - id: live-streaming-lower-latency-removes-buffer-failure-margin
+    statement: 缩短分片与播放缓冲会降低端到端时延，同时减少吸收编码抖动、网络突发和重传的余量。
+  - id: live-streaming-dvr-window-bounds-replay-and-recovery
+    statement: DVR 留存窗口同时限定观众可回看的历史和故障后可重建的直播时间轴，窗口之外不能承诺无缝恢复。
