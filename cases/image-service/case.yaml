@@ -18,7 +18,7 @@ dimensions:
 claims:
   - id: image-service-variant-key-must-cover-every-byte-determining-input
     statement: 图片派生键必须覆盖源摘要、规范化处理配方、编码器版本及影响输出的元数据规则，否则同一键会代表不同字节。
-  - id: image-service-lazy-generation-trades-write-amplification-for-cold-read-latency
-    statement: 按需生成避免预先制造无人访问的尺寸组合，但把计算失败和首读延迟放到用户请求路径。
+  - id: image-service-build-attempt-fencing-must-gate-publication
+    statement: 图片生成超时重派后只有当前 BuildAttempt 的 fence token 能发布 ready，即使旧 attempt 更早完成或产生相同 digest 也必须拒绝。
   - id: image-service-cached-bytes-must-not-outlive-access-authority
     statement: 私有图片的缓存字节不能凭旧签名或旧策略无限继续可见，访问判定必须有可撤销的版本边界。

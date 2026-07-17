@@ -19,5 +19,5 @@ claims:
     statement: 转码任务只有在当前 DAG revision 的全部必需父产物完成后才可运行，队列到达顺序不能替代依赖关系。
   - id: transcoding-pipeline-attempt-fencing-must-reject-late-workers
     statement: 超时重试或推测执行后必须用 attempt fencing 拒绝旧 worker 的迟到提交，否则较旧结果会覆盖当前产物。
-  - id: transcoding-pipeline-release-must-isolate-partial-completion
-    statement: 各 rendition 分别完成不等于标题可播放，只有校验通过的 release manifest 原子发布才能隔离部分完成。
+  - id: transcoding-pipeline-release-commit-must-atomically-record-external-effects
+    statement: 完整 release 的提交必须与按 job、revision、effect type 去重的持久 outbox 同事务，外部成功响应丢失只能记 UNKNOWN 并以幂等或对账闭合。

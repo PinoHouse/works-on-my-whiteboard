@@ -15,9 +15,9 @@ dimensions:
   - observability-release-evolution
   - security-privacy-multitenancy
 claims:
-  - id: video-on-demand-manifest-publication-must-not-expose-partial-renditions
-    statement: 点播标题的发布指针只有在某一版本 manifest 引用的全部必需分片可读后才能切换，否则一次播放会观察到部分发布。
-  - id: video-on-demand-abr-can-only-adapt-among-published-compatible-renditions
-    statement: 自适应码率只能在同一已发布时间轴的兼容 rendition 间切换，带宽估计不能修复跨版本缺片或时间戳不连续。
+  - id: video-on-demand-release-selection-must-bind-a-complete-client-compatible-contract
+    statement: 点播 release 只有在必需资产、协议、codec、DRM scheme 与 key generation 完整后才可供选择，网关必须按客户端能力返回最新兼容版本。
+  - id: video-on-demand-license-revocation-has-an-explicit-exposure-window
+    statement: 撤权可阻止新 manifest、分片授权、license 与续期，却无法即时收回已签 license、已得密钥或离线字节，暴露上界由 expiry 或在线回检决定。
   - id: video-on-demand-startup-and-steady-state-throughput-are-separate-budgets
     statement: 首帧启动受清单与首批分片往返支配，稳态卡顿受持续可用吞吐与缓冲消耗支配，平均带宽不能同时代表两者。
